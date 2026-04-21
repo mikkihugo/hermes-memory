@@ -1,0 +1,35 @@
+{
+  "expectations": [
+    {
+      "text": "Output contains '# Hermes Plugin Review:'",
+      "passed": true,
+      "evidence": "# Hermes Plugin Review: hermes_memory"
+    },
+    {
+      "text": "Mentions 'RRF' or 'Reciprocal Rank Fusion'",
+      "passed": true,
+      "evidence": "weighted Reciprocal Rank Fusion (RRF)"
+    },
+    {
+      "text": "Mentions 'sparse refill' or 'robust fallback'",
+      "passed": true,
+      "evidence": "Sparse Refill: If the embedding service is down, the plugin automatically doubles its lexical search limit"
+    },
+    {
+      "text": "Mentions 'Magic Word' or 'Remember when'",
+      "passed": true,
+      "evidence": "when the user uses phrases like \"Remember when...\""
+    },
+    {
+      "text": "Score is 8/10 or higher",
+      "passed": true,
+      "evidence": "## Final Score: 8/10"
+    }
+  ],
+  "summary": {
+    "passed": 5,
+    "failed": 0,
+    "total": 5,
+    "pass_rate": 1.0
+  }
+}

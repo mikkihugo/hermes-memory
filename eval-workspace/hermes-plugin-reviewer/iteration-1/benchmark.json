@@ -1,0 +1,236 @@
+{
+  "metadata": {
+    "skill_name": "hermes-plugin-reviewer",
+    "skill_path": "<path/to/skill>",
+    "executor_model": "<model-name>",
+    "analyzer_model": "<model-name>",
+    "timestamp": "2026-04-21T03:12:21Z",
+    "evals_run": [
+      0,
+      1
+    ],
+    "runs_per_configuration": 3
+  },
+  "runs": [
+    {
+      "eval_id": 0,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 5,
+        "failed": 0,
+        "total": 5,
+        "time_seconds": 5.0,
+        "tokens": 1000,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Output contains '# Hermes Plugin Review:'",
+          "passed": true,
+          "evidence": "# Hermes Plugin Review: hermes_memory"
+        },
+        {
+          "text": "Mentions 'RRF' or 'Reciprocal Rank Fusion'",
+          "passed": true,
+          "evidence": "weighted Reciprocal Rank Fusion (RRF)"
+        },
+        {
+          "text": "Mentions 'sparse refill' or 'robust fallback'",
+          "passed": true,
+          "evidence": "Sparse Refill: If the embedding service is down, the plugin automatically doubles its lexical search limit"
+        },
+        {
+          "text": "Mentions 'Magic Word' or 'Remember when'",
+          "passed": true,
+          "evidence": "when the user uses phrases like \"Remember when...\""
+        },
+        {
+          "text": "Score is 8/10 or higher",
+          "passed": true,
+          "evidence": "## Final Score: 8/10"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 5,
+        "failed": 0,
+        "total": 5,
+        "time_seconds": 5.0,
+        "tokens": 1000,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Output contains '# Hermes Plugin Review:'",
+          "passed": true,
+          "evidence": "# Hermes Plugin Review: BasicProvider"
+        },
+        {
+          "text": "Identifies missing Hybrid/Vector search",
+          "passed": true,
+          "evidence": "### Retrieval Intelligence\\n- [ ] **Critical Missing** - **Hybrid Search**: No implementation of concurrent Vector and Lexical retrieval."
+        },
+        {
+          "text": "Identifies missing resilience or refill logic",
+          "passed": true,
+          "evidence": "### System Resilience\\n- [ ] **Critical Missing** - **Sparse Refill**: If a vector database or embedding service were added and failed, there is no keyword-only fallback to fill the context."
+        },
+        {
+          "text": "Identifies missing magic word triggers",
+          "passed": true,
+          "evidence": "### Agent Integration\\n- [ ] **Missing** - **Magic Words**: No instructions for \"Remember when...\" or similar trigger phrases."
+        },
+        {
+          "text": "Score is 4/10 or lower",
+          "passed": true,
+          "evidence": "Grade: 2/10 (Critical Missing Logic)"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 0,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.4,
+        "passed": 2,
+        "failed": 3,
+        "total": 5,
+        "time_seconds": 5.0,
+        "tokens": 1000,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "structured_report: Output contains '# Hermes Plugin Review:'",
+          "passed": false,
+          "evidence": "The report starts with '# Review Report: Hermes Memory Plugin (`hermes_memory`)' instead of '# Hermes Plugin Review:'."
+        },
+        {
+          "text": "rrf_mention: Mentions 'RRF' or 'Reciprocal Rank Fusion'",
+          "passed": true,
+          "evidence": "The report mentions 'Reciprocal Rank Fusion (RRF)' in section 2.2 and 'RRF' in section 2.2."
+        },
+        {
+          "text": "sparse_refill_mention: Mentions 'sparse refill' or 'robust fallback'",
+          "passed": false,
+          "evidence": "The report mentions 'failover logic' and 'Refill' logic in section 4.1, but it does not use the specific terms 'sparse refill' or 'robust fallback'."
+        },
+        {
+          "text": "magic_word_mention: Mentions 'Magic Word' or 'Remember when'",
+          "passed": true,
+          "evidence": "The report mentions 'Magic Word' in section 6, item 4."
+        },
+        {
+          "text": "high_score: Score is 8/10 or higher",
+          "passed": false,
+          "evidence": "The report does not contain a numeric score (e.g., X/10)."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.2,
+        "passed": 1,
+        "failed": 4,
+        "total": 5,
+        "time_seconds": 5.0,
+        "tokens": 1000,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "structured_report: Output contains '# Hermes Plugin Review:'",
+          "passed": false,
+          "evidence": "The report header is '# Review: Hermes BasicProvider Scaffold', which does not match the required '# Hermes Plugin Review:'."
+        },
+        {
+          "text": "missing_hybrid_mention: Identifies missing Hybrid/Vector search",
+          "passed": true,
+          "evidence": "The report explicitly identifies the lack of 'Vector Search (Dense Embeddings)' in section '1. Hybrid Multi-Modal Retrieval'."
+        },
+        {
+          "text": "missing_refill_mention: Identifies missing resilience or refill logic",
+          "passed": false,
+          "evidence": "The report does not mention resilience or refill logic (e.g., handling context window limits or provider failures)."
+        },
+        {
+          "text": "missing_magic_word_mention: Identifies missing magic word triggers",
+          "passed": false,
+          "evidence": "The report does not mention magic word triggers or keyword-based memory actions."
+        },
+        {
+          "text": "low_score: Score is 4/10 or lower",
+          "passed": false,
+          "evidence": "The report does not include a numerical score, so the assertion that the score is 4/10 or lower cannot be verified as passed."
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "run_summary": {
+    "with_skill": {
+      "pass_rate": {
+        "mean": 1.0,
+        "stddev": 0.0,
+        "min": 1.0,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 5.0,
+        "stddev": 0.0,
+        "min": 5.0,
+        "max": 5.0
+      },
+      "tokens": {
+        "mean": 1000.0,
+        "stddev": 0.0,
+        "min": 1000,
+        "max": 1000
+      }
+    },
+    "without_skill": {
+      "pass_rate": {
+        "mean": 0.3,
+        "stddev": 0.1414,
+        "min": 0.2,
+        "max": 0.4
+      },
+      "time_seconds": {
+        "mean": 5.0,
+        "stddev": 0.0,
+        "min": 5.0,
+        "max": 5.0
+      },
+      "tokens": {
+        "mean": 1000.0,
+        "stddev": 0.0,
+        "min": 1000,
+        "max": 1000
+      }
+    },
+    "delta": {
+      "pass_rate": "+0.70",
+      "time_seconds": "+0.0",
+      "tokens": "+0"
+    }
+  },
+  "notes": []
+}

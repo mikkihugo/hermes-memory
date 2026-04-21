@@ -1,0 +1,35 @@
+{
+  "expectations": [
+    {
+      "text": "structured_report: Output contains '# Hermes Plugin Review:'",
+      "passed": false,
+      "evidence": "The report starts with '# Review Report: Hermes Memory Plugin (`hermes_memory`)' instead of '# Hermes Plugin Review:'."
+    },
+    {
+      "text": "rrf_mention: Mentions 'RRF' or 'Reciprocal Rank Fusion'",
+      "passed": true,
+      "evidence": "The report mentions 'Reciprocal Rank Fusion (RRF)' in section 2.2 and 'RRF' in section 2.2."
+    },
+    {
+      "text": "sparse_refill_mention: Mentions 'sparse refill' or 'robust fallback'",
+      "passed": false,
+      "evidence": "The report mentions 'failover logic' and 'Refill' logic in section 4.1, but it does not use the specific terms 'sparse refill' or 'robust fallback'."
+    },
+    {
+      "text": "magic_word_mention: Mentions 'Magic Word' or 'Remember when'",
+      "passed": true,
+      "evidence": "The report mentions 'Magic Word' in section 6, item 4."
+    },
+    {
+      "text": "high_score: Score is 8/10 or higher",
+      "passed": false,
+      "evidence": "The report does not contain a numeric score (e.g., X/10)."
+    }
+  ],
+  "summary": {
+    "passed": 2,
+    "failed": 3,
+    "total": 5,
+    "pass_rate": 0.4
+  }
+}

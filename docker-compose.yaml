@@ -1,0 +1,18 @@
+services:
+  hermes-postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: hermes
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: hermes_memory
+    ports:
+      - "5432:5432"
+    volumes:
+      - hermes-db-data:/var/lib/postgresql/data
+    # Note: For production use, you'll need an image containing 
+    # pgvector, vchord, and apache-age extensions.
+    command: >
+      sh -c "docker-entrypoint.sh postgres"
+
+volumes:
+  hermes-db-data:

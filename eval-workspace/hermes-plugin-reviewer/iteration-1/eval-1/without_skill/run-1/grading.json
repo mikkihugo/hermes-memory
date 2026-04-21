@@ -1,0 +1,35 @@
+{
+  "expectations": [
+    {
+      "text": "structured_report: Output contains '# Hermes Plugin Review:'",
+      "passed": false,
+      "evidence": "The report header is '# Review: Hermes BasicProvider Scaffold', which does not match the required '# Hermes Plugin Review:'."
+    },
+    {
+      "text": "missing_hybrid_mention: Identifies missing Hybrid/Vector search",
+      "passed": true,
+      "evidence": "The report explicitly identifies the lack of 'Vector Search (Dense Embeddings)' in section '1. Hybrid Multi-Modal Retrieval'."
+    },
+    {
+      "text": "missing_refill_mention: Identifies missing resilience or refill logic",
+      "passed": false,
+      "evidence": "The report does not mention resilience or refill logic (e.g., handling context window limits or provider failures)."
+    },
+    {
+      "text": "missing_magic_word_mention: Identifies missing magic word triggers",
+      "passed": false,
+      "evidence": "The report does not mention magic word triggers or keyword-based memory actions."
+    },
+    {
+      "text": "low_score: Score is 4/10 or lower",
+      "passed": false,
+      "evidence": "The report does not include a numerical score, so the assertion that the score is 4/10 or lower cannot be verified as passed."
+    }
+  ],
+  "summary": {
+    "passed": 1,
+    "failed": 4,
+    "total": 5,
+    "pass_rate": 0.2
+  }
+}

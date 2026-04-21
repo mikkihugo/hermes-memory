@@ -1,0 +1,7 @@
+name: hermes_memory
+version: 0.1.0
+description: Postgres-first Hermes memory provider with VectorChord, BM25, and RRF fusion
+author: mhugo
+provides:
+  hooks: false
+  tools: false

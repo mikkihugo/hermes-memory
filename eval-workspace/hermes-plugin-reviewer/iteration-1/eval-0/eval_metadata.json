@@ -1,0 +1,12 @@
+{
+  "eval_id": 0,
+  "eval_name": "review-hermes-memory-gold",
+  "prompt": "Please review the current hermes_memory plugin in /home/mhugo/code/hermes_memory. Is it production ready and 'smart' enough?",
+  "assertions": [
+    {"name": "structured_report", "text": "Output contains '# Hermes Plugin Review:'"},
+    {"name": "rrf_mention", "text": "Mentions 'RRF' or 'Reciprocal Rank Fusion'"},
+    {"name": "sparse_refill_mention", "text": "Mentions 'sparse refill' or 'robust fallback'"},
+    {"name": "magic_word_mention", "text": "Mentions 'Magic Word' or 'Remember when'"},
+    {"name": "high_score", "text": "Score is 8/10 or higher"}
+  ]
+}

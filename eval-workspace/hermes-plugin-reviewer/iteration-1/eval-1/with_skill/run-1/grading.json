@@ -1,0 +1,35 @@
+{
+  "expectations": [
+    {
+      "text": "Output contains '# Hermes Plugin Review:'",
+      "passed": true,
+      "evidence": "# Hermes Plugin Review: BasicProvider"
+    },
+    {
+      "text": "Identifies missing Hybrid/Vector search",
+      "passed": true,
+      "evidence": "### Retrieval Intelligence\\n- [ ] **Critical Missing** - **Hybrid Search**: No implementation of concurrent Vector and Lexical retrieval."
+    },
+    {
+      "text": "Identifies missing resilience or refill logic",
+      "passed": true,
+      "evidence": "### System Resilience\\n- [ ] **Critical Missing** - **Sparse Refill**: If a vector database or embedding service were added and failed, there is no keyword-only fallback to fill the context."
+    },
+    {
+      "text": "Identifies missing magic word triggers",
+      "passed": true,
+      "evidence": "### Agent Integration\\n- [ ] **Missing** - **Magic Words**: No instructions for \"Remember when...\" or similar trigger phrases."
+    },
+    {
+      "text": "Score is 4/10 or lower",
+      "passed": true,
+      "evidence": "Grade: 2/10 (Critical Missing Logic)"
+    }
+  ],
+  "summary": {
+    "passed": 5,
+    "failed": 0,
+    "total": 5,
+    "pass_rate": 1.0
+  }
+}

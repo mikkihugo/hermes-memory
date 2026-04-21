@@ -1,0 +1,11 @@
+{
+  "dsn": "file:///home/mhugo/.hermes/memory-store.json",
+  "workspace": "hermes",
+  "embedding_base_url": "https://llm-gateway.centralcloud.com/v1",
+  "embedding_model": "qwen3-embedding-4b",
+  "embedding_dimensions": 2560,
+  "lexical_enabled": true,
+  "vector_enabled": true,
+  "graph_enabled": false,
+  "bootstrap_schema": true
+}

@@ -1,0 +1,12 @@
+{
+  "eval_id": 1,
+  "eval_name": "review-bare-scaffold",
+  "prompt": "Review this basic Hermes memory provider scaffold. What is it missing to be a 'smart' system?\n\n```python\nclass BasicProvider(MemoryProvider):\n    def initialize(self, session_id, **kwargs): pass\n    def prefetch(self, query, session_id=''): return ''\n    def sync_turn(self, user, assistant, session_id=''): pass\n    def handle_tool_call(self, name, args): return 'Done'\n```",
+  "assertions": [
+    {"name": "structured_report", "text": "Output contains '# Hermes Plugin Review:'"},
+    {"name": "missing_hybrid_mention", "text": "Identifies missing Hybrid/Vector search"},
+    {"name": "missing_refill_mention", "text": "Identifies missing resilience or refill logic"},
+    {"name": "missing_magic_word_mention", "text": "Identifies missing magic word triggers"},
+    {"name": "low_score", "text": "Score is 4/10 or lower"}
+  ]
+}

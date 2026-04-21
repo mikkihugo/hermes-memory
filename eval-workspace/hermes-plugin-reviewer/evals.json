@@ -1,0 +1,33 @@
+{
+  "skill_name": "hermes-plugin-reviewer",
+  "evals": [
+    {
+      "id": 0,
+      "name": "review-hermes-memory-gold",
+      "prompt": "Please review the current hermes_memory plugin in /home/mhugo/code/hermes_memory. Is it production ready and 'smart' enough?",
+      "expected_output": "A report praising the interface compliance, RRF weights, and sparse refill logic, with a high score (9-10/10).",
+      "files": ["/home/mhugo/code/hermes_memory/provider.py", "/home/mhugo/code/hermes_memory/storage.py", "/home/mhugo/code/hermes_memory/retrieval.py"],
+      "assertions": [
+        {"name": "structured_report", "text": "Output contains '# Hermes Plugin Review:'"},
+        {"name": "rrf_mention", "text": "Mentions 'RRF' or 'Reciprocal Rank Fusion'"},
+        {"name": "sparse_refill_mention", "text": "Mentions 'sparse refill' or 'robust fallback'"},
+        {"name": "magic_word_mention", "text": "Mentions 'Magic Word' or 'Remember when'"},
+        {"name": "high_score", "text": "Score is 8/10 or higher"}
+      ]
+    },
+    {
+      "id": 1,
+      "name": "review-bare-scaffold",
+      "prompt": "Review this basic Hermes memory provider scaffold. What is it missing to be a 'smart' system?\n\n```python\nclass BasicProvider(MemoryProvider):\n    def initialize(self, session_id, **kwargs): pass\n    def prefetch(self, query, session_id=''): return ''\n    def sync_turn(self, user, assistant, session_id=''): pass\n    def handle_tool_call(self, name, args): return 'Done'\n```",
+      "expected_output": "A report identifying missing RRF, lack of sparse refill, and lack of Magic Word integration, with a low-to-moderate score.",
+      "files": [],
+      "assertions": [
+        {"name": "structured_report", "text": "Output contains '# Hermes Plugin Review:'"},
+        {"name": "missing_hybrid_mention", "text": "Identifies missing Hybrid/Vector search"},
+        {"name": "missing_refill_mention", "text": "Identifies missing resilience or refill logic"},
+        {"name": "missing_magic_word_mention", "text": "Identifies missing magic word triggers"},
+        {"name": "low_score", "text": "Score is 4/10 or lower"}
+      ]
+    }
+  ]
+}
