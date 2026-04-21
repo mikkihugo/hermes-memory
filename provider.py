@@ -28,6 +28,7 @@ try:
     from .reranker import OpenAICompatibleRerankerClient, RerankerClientConfig
     from .schemas import ALL_TOOL_SCHEMAS
     from .storage import HermesMemoryStorage
+    from .admin import HermesMemoryAdmin
 except ImportError:
     from config import HermesMemoryConfig, load_provider_config, save_provider_config
     from install import install_plugin, resolve_install_path
@@ -36,6 +37,7 @@ except ImportError:
     from reranker import OpenAICompatibleRerankerClient, RerankerClientConfig
     from schemas import ALL_TOOL_SCHEMAS
     from storage import HermesMemoryStorage
+    from admin import HermesMemoryAdmin
 
 
 logger = logging.getLogger(__name__)
@@ -45,6 +47,16 @@ TOOL_NAME_STORE = "hermes_memory_store"
 TOOL_NAME_FEEDBACK = "hermes_memory_feedback"
 TOOL_NAME_GRAPH = "hermes_memory_graph"
 TOOL_NAME_METRICS = "hermes_memory_metrics"
+TOOL_NAME_BANK_CREATE = "memory_bank_create"
+TOOL_NAME_BANK_DELETE = "memory_bank_delete"
+TOOL_NAME_BANK_LIST = "memory_bank_list"
+TOOL_NAME_BANK_CONFIG_GET = "memory_bank_config_get"
+TOOL_NAME_BANK_CONFIG_SET = "memory_bank_config_set"
+TOOL_NAME_STATS = "memory_stats"
+TOOL_NAME_BROWSE = "memory_browse"
+TOOL_NAME_SEARCH_DEBUG = "memory_search_debug"
+TOOL_NAME_ENTITIES = "memory_entities"
+TOOL_NAME_AUDIT = "memory_audit"
 UNKNOWN_TOOL_ERROR_TEMPLATE = "Unknown tool: {tool_name}"
 OPERATION_PREFETCH = "prefetch"
 OPERATION_SYNC_TURN = "sync_turn"
@@ -62,6 +74,7 @@ class HermesMemoryProvider(MemoryProvider):
         self._config = HermesMemoryConfig()
         self._storage: HermesMemoryStorage | None = None
         self._hindsight_client = None
+        self._admin: HermesMemoryAdmin | None = None
         self._session_id = ""
         self._prefetch_lock = threading.Lock()
         self._prefetch_result = ""
@@ -114,17 +127,63 @@ class HermesMemoryProvider(MemoryProvider):
         )
         if self._config.hindsight_enabled:
             import os
-            os.environ["HINDSIGHT_EMBED_API_DATABASE_URL"] = self._config.dsn
-            from hindsight import HindsightEmbedded
-            
-            # Monkey-patch to avoid uv/uvx in restricted environment
-            def custom_find_api_command(self_mgr):
-                return ["python3", "-m", "hindsight_api.main"]
-            
-            from hindsight_embed.daemon_embed_manager import DaemonEmbedManager
-            DaemonEmbedManager._find_api_command = custom_find_api_command
-            
-            self._hindsight_client = HindsightEmbedded(profile=self._config.hindsight_profile)
+            import sys
+            from pathlib import Path
+
+            # Add vendored to Python path so hindsight_api can be imported
+            vendored_path = str(Path(__file__).parent / "vendored")
+            if vendored_path not in sys.path:
+                sys.path.insert(0, vendored_path)
+
+            # Set Hindsight API environment variables
+            os.environ["HINDSIGHT_API_DATABASE_URL"] = self._config.dsn
+            os.environ["HINDSIGHT_API_LLM_PROVIDER"] = "openai"
+            os.environ["HINDSIGHT_API_LLM_BASE_URL"] = self._config.llm_base_url or "https://llm-gateway.centralcloud.com/v1"
+            os.environ["HINDSIGHT_API_LLM_API_KEY"] = self._config.llm_api_key or ""
+            os.environ["HINDSIGHT_API_LLM_MODEL"] = self._config.llm_model or "qwen3.5-9b"
+            os.environ["HINDSIGHT_API_EMBEDDINGS_OPENAI_BASE_URL"] = self._config.embedding_base_url
+            os.environ["HINDSIGHT_API_EMBEDDINGS_OPENAI_MODEL"] = self._config.embedding_model
+            os.environ["HINDSIGHT_API_EMBEDDINGS_OPENAI_API_KEY"] = self._config.embedding_api_key or ""
+            os.environ["HINDSIGHT_API_RERANKER_PROVIDER"] = "openai"
+            os.environ["HINDSIGHT_API_RERANKER_OPENAI_BASE_URL"] = self._config.rerank_base_url
+            os.environ["HINDSIGHT_API_RERANKER_OPENAI_API_KEY"] = self._config.rerank_api_key or ""
+            os.environ["HINDSIGHT_API_RERANKER_OPENAI_MODEL"] = self._config.rerank_model or ""
+            os.environ["HINDSIGHT_API_VECTOR_EXTENSION"] = "vchord"
+            os.environ["HINDSIGHT_API_TEXT_SEARCH_EXTENSION"] = "vchord"
+            os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+            import threading
+            import time
+            import urllib.request
+
+            from hindsight_api import MemoryEngine
+            from hindsight_api.api import create_app
+            import uvicorn
+
+            # Initialize engine
+            engine = MemoryEngine(run_migrations=True)
+
+            # Create FastAPI app
+            app = create_app(memory=engine, http_api_enabled=True, mcp_api_enabled=False, initialize_memory=True)
+
+            def run_server():
+                uvicorn.run(app, host="127.0.0.1", port=8888, log_level="error")
+
+            server_thread = threading.Thread(target=run_server, daemon=True, name="hindsight-api")
+            server_thread.start()
+
+            # Wait for server to be ready
+            for _ in range(50):
+                try:
+                    urllib.request.urlopen("http://127.0.0.1:8888/v1/banks", timeout=1)
+                    break
+                except Exception:
+                    time.sleep(0.2)
+
+            # Import and create HTTP client
+            from hindsight_client import Hindsight
+            self._hindsight = Hindsight(base_url="http://127.0.0.1:8888")
+            self._admin = HermesMemoryAdmin(self._hindsight)
         self._rerankers = self._build_reranker_pipeline()
 
     def system_prompt_block(self) -> str:
@@ -192,9 +251,9 @@ class HermesMemoryProvider(MemoryProvider):
     def sync_turn(self, user_content: str, assistant_content: str, *, session_id: str = "") -> None:
         """Persist a completed turn."""
         started_at = self._metrics.start_operation()
-        if self._config.hindsight_enabled and self._hindsight_client:
+        if self._config.hindsight_enabled and self._hindsight:
             try:
-                self._hindsight_client.client().retain(
+                self._hindsight.retain(
                     bank_id=self._config.workspace,
                     content=f"User: {user_content}\nAssistant: {assistant_content}",
                     context="Conversation turn",
@@ -235,6 +294,16 @@ class HermesMemoryProvider(MemoryProvider):
             TOOL_NAME_FEEDBACK: self._handle_feedback,
             TOOL_NAME_GRAPH: self._handle_graph,
             TOOL_NAME_METRICS: self._handle_metrics,
+            TOOL_NAME_BANK_CREATE: self._handle_bank_create,
+            TOOL_NAME_BANK_DELETE: self._handle_bank_delete,
+            TOOL_NAME_BANK_LIST: self._handle_bank_list,
+            TOOL_NAME_BANK_CONFIG_GET: self._handle_bank_config_get,
+            TOOL_NAME_BANK_CONFIG_SET: self._handle_bank_config_set,
+            TOOL_NAME_STATS: self._handle_stats,
+            TOOL_NAME_BROWSE: self._handle_browse,
+            TOOL_NAME_SEARCH_DEBUG: self._handle_search_debug,
+            TOOL_NAME_ENTITIES: self._handle_entities,
+            TOOL_NAME_AUDIT: self._handle_audit,
         }
 
         handler = handlers.get(tool_name)
@@ -349,6 +418,133 @@ class HermesMemoryProvider(MemoryProvider):
 
     def _handle_metrics(self, args: dict[str, Any]) -> str:
         return json.dumps({"metrics": self._metrics.snapshot().to_payload()})
+
+    def _handle_bank_create(self, args: dict[str, Any]) -> str:
+        if self._admin is None:
+            return json.dumps({"error": "hermes_memory is not initialized"})
+        name = str(args.get("name", "")).strip()
+        if not name:
+            return json.dumps({"error": "name is required"})
+        background = str(args.get("background", "")).strip()
+        try:
+            bank_id = self._admin.create_bank(name, background)
+            return json.dumps({"bank_id": bank_id})
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def _handle_bank_delete(self, args: dict[str, Any]) -> str:
+        if self._admin is None:
+            return json.dumps({"error": "hermes_memory is not initialized"})
+        bank_id = str(args.get("bank_id", "")).strip()
+        if not bank_id:
+            return json.dumps({"error": "bank_id is required"})
+        try:
+            result = self._admin.delete_bank(bank_id)
+            return json.dumps(result)
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def _handle_bank_list(self, args: dict[str, Any]) -> str:
+        if self._admin is None:
+            return json.dumps({"error": "hermes_memory is not initialized"})
+        try:
+            banks = self._admin.list_banks()
+            return json.dumps({"banks": banks})
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def _handle_bank_config_get(self, args: dict[str, Any]) -> str:
+        if self._admin is None:
+            return json.dumps({"error": "hermes_memory is not initialized"})
+        bank_id = str(args.get("bank_id", "")).strip()
+        if not bank_id:
+            return json.dumps({"error": "bank_id is required"})
+        try:
+            config = self._admin.get_bank_config(bank_id)
+            return json.dumps(config)
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def _handle_bank_config_set(self, args: dict[str, Any]) -> str:
+        if self._admin is None:
+            return json.dumps({"error": "hermes_memory is not initialized"})
+        bank_id = str(args.get("bank_id", "")).strip()
+        if not bank_id:
+            return json.dumps({"error": "bank_id is required"})
+        # Strip bank_id from kwargs before passing to set_bank_config
+        kwargs = {k: v for k, v in args.items() if k != "bank_id"}
+        try:
+            result = self._admin.set_bank_config(bank_id, **kwargs)
+            return json.dumps(result)
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def _handle_stats(self, args: dict[str, Any]) -> str:
+        if self._admin is None:
+            return json.dumps({"error": "hermes_memory is not initialized"})
+        bank_id = str(args.get("bank_id", "")).strip()
+        if not bank_id:
+            return json.dumps({"error": "bank_id is required"})
+        try:
+            stats = self._admin.get_stats(bank_id)
+            return json.dumps(stats)
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def _handle_browse(self, args: dict[str, Any]) -> str:
+        if self._admin is None:
+            return json.dumps({"error": "hermes_memory is not initialized"})
+        bank_id = str(args.get("bank_id", "")).strip()
+        if not bank_id:
+            return json.dumps({"error": "bank_id is required"})
+        limit = int(args.get("limit", 20))
+        offset = int(args.get("offset", 0))
+        fact_type = args.get("fact_type")
+        try:
+            result = self._admin.browse_memories(bank_id, limit, offset, fact_type)
+            return json.dumps(result)
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def _handle_search_debug(self, args: dict[str, Any]) -> str:
+        if self._admin is None:
+            return json.dumps({"error": "hermes_memory is not initialized"})
+        bank_id = str(args.get("bank_id", "")).strip()
+        query = str(args.get("query", "")).strip()
+        if not bank_id or not query:
+            return json.dumps({"error": "bank_id and query are required"})
+        show_trace = bool(args.get("show_trace", False))
+        try:
+            result = self._admin.search_debug(bank_id, query, show_trace)
+            return json.dumps(result)
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def _handle_entities(self, args: dict[str, Any]) -> str:
+        if self._admin is None:
+            return json.dumps({"error": "hermes_memory is not initialized"})
+        bank_id = str(args.get("bank_id", "")).strip()
+        if not bank_id:
+            return json.dumps({"error": "bank_id is required"})
+        limit = int(args.get("limit", 50))
+        try:
+            entities = self._admin.get_entities(bank_id, limit)
+            return json.dumps(entities)
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def _handle_audit(self, args: dict[str, Any]) -> str:
+        if self._admin is None:
+            return json.dumps({"error": "hermes_memory is not initialized"})
+        bank_id = str(args.get("bank_id", "")).strip()
+        if not bank_id:
+            return json.dumps({"error": "bank_id is required"})
+        limit = int(args.get("limit", 50))
+        try:
+            audit = self._admin.get_audit_log(bank_id, limit)
+            return json.dumps(audit)
+        except Exception as e:
+            return json.dumps({"error": str(e)})
 
     def shutdown(self) -> None:
         """Clean shutdown hook."""
@@ -481,6 +677,21 @@ class HermesMemoryProvider(MemoryProvider):
                 "default": "hermes",
             },
             {
+                "key": "llm_base_url",
+                "description": "LLM Gateway base URL for Hindsight (e.g. https://llm-gateway.centralcloud.com/v1)",
+                "default": "",
+            },
+            {
+                "key": "llm_api_key",
+                "description": "API key for LLM Gateway",
+                "default": "",
+            },
+            {
+                "key": "llm_model",
+                "description": "LLM model name for Hindsight (e.g. qwen3.5-9b)",
+                "default": "qwen3.5-9b",
+            },
+            {
                 "key": "pool_min_size",
                 "description": "Minimum number of pooled Postgres connections",
                 "default": 1,
@@ -498,18 +709,18 @@ class HermesMemoryProvider(MemoryProvider):
 
     def _search_and_fuse(self, query: str, limit: int) -> list[Any]:
         """Run lexical/vector retrieval, fuse, and optionally rerank."""
-        if self._config.hindsight_enabled and self._hindsight_client:
+        if self._config.hindsight_enabled and self._hindsight:
             try:
                 from .retrieval import MemoryCandidate
-                result = self._hindsight_client.client().recall(
+                result = self._hindsight.recall(
                     bank_id=self._config.workspace,
                     query=query,
                 )
                 candidates = []
-                for i, fact in enumerate(result.facts):
+                for i, res in enumerate(result.results):
                     candidates.append(MemoryCandidate(
-                        memory_item_id=fact.fact_id,
-                        content=fact.content,
+                        memory_item_id=res.id,
+                        content=res.text,
                         source_uri="hindsight",
                         confidence=1.0,
                         rank=i+1,

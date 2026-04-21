@@ -73,6 +73,10 @@ class HermesMemoryConfig(BaseModel):
     bootstrap_schema: bool = Field(default=True)
     hindsight_enabled: bool = Field(default=False)
     hindsight_profile: str = Field(default="hermes")
+    # LLM Gateway settings for Hindsight
+    llm_base_url: str = Field(default="")
+    llm_api_key: str = Field(default="")
+    llm_model: str = Field(default="qwen3.5-9b")
     prefetch_limit: int = Field(default=DEFAULT_PREFETCH_LIMIT, gt=0)
     context_tokens: int = Field(default=DEFAULT_CONTEXT_TOKENS, gt=0)
     rrf_k: int = Field(default=DEFAULT_RRF_K, ge=0)
