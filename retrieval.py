@@ -29,7 +29,7 @@ class MemoryCandidate(BaseModel):
     memory_item_id: str = Field(..., min_length=1, description="Unique memory item ID")
     content: str = Field(..., min_length=1, description="Memory content")
     source_uri: str = Field(..., min_length=1, description="Source URI")
-    confidence: float = Field(..., ge=0.0, le=1.0, description="Confidence score")
+    confidence: float = Field(..., ge=0.0, description="Per-lane raw score (BM25 / cosine / etc.); not normalized")
     rank: int = Field(..., ge=1, description="Rank position (1-indexed)")
     lane: str = Field(..., description="Retrieval lane (lexical/vector/graph)")
 
@@ -44,7 +44,7 @@ class FusedCandidate(BaseModel):
     memory_item_id: str = Field(..., min_length=1, description="Unique memory item ID")
     content: str = Field(..., min_length=1, description="Memory content")
     source_uri: str = Field(..., min_length=1, description="Source URI")
-    confidence: float = Field(..., ge=0.0, le=1.0, description="Confidence score")
+    confidence: float = Field(..., ge=0.0, description="Per-lane raw score carried through fusion; not normalized")
     fused_score: float = Field(..., ge=0.0, description="Fused ranking score")
 
     class Config:
