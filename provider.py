@@ -124,7 +124,20 @@ class SingularityMemoryProvider(MemoryProvider):
             bootstrap_schema=self._config.bootstrap_schema,
             graph_enabled=self._config.graph_enabled,
             graph_name=self._config.graph_name,
+            vector_enabled=self._config.vector_enabled,
         )
+        if self._config.vector_enabled:
+            pending = self._storage.count_pending_embeddings(workspace=self._config.workspace)
+            if pending:
+                logger.info(
+                    "Dense lane enabled; backfilling %s pending embeddings in the background.",
+                    pending,
+                )
+                threading.Thread(
+                    target=self._run_embedding_backfill,
+                    daemon=True,
+                    name="singularity-memory-backfill",
+                ).start()
         if self._config.server_url:
             from singularity_memory_client import SingularityMemoryClient
 
@@ -416,7 +429,30 @@ class SingularityMemoryProvider(MemoryProvider):
         )
 
     def _handle_metrics(self, args: dict[str, Any]) -> str:
-        return json.dumps({"metrics": self._metrics.snapshot().to_payload()})
+        payload = {"metrics": self._metrics.snapshot().to_payload()}
+        if self._config.vector_enabled and self._storage is not None:
+            try:
+                payload["embeddings_pending"] = self._storage.count_pending_embeddings(
+                    workspace=self._config.workspace
+                )
+            except Exception:
+                logger.exception("Failed to read embeddings_pending counter")
+        return json.dumps(payload)
+
+    def _run_embedding_backfill(self) -> None:
+        """Daemon-thread entrypoint: embed every stored item that lacks one."""
+        if self._storage is None:
+            return
+        try:
+            processed = self._storage.backfill_embeddings(
+                workspace=self._config.workspace,
+                batch_size=self._config.embedding_backfill_batch_size,
+            )
+        except Exception:
+            logger.exception("Embedding backfill thread crashed")
+            return
+        if processed:
+            logger.info("Embedding backfill complete (%s items embedded).", processed)
 
     def _handle_bank_create(self, args: dict[str, Any]) -> str:
         if self._admin is None:

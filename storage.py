@@ -164,6 +164,7 @@ class SingularityMemoryStorage:
         bootstrap_schema: bool,
         graph_enabled: bool,
         graph_name: str,
+        vector_enabled: bool = False,
     ) -> None:
         """Initialize the storage backend."""
         if not dsn.strip():
@@ -172,6 +173,7 @@ class SingularityMemoryStorage:
         self._tokenizer_name = tokenizer_name
         self._vector_index_name = vector_index_name
         self._bm25_index_name = bm25_index_name
+        self._vector_enabled = vector_enabled
         self._graph_enabled = graph_enabled
         self._graph_name = graph_name
         self._embedding_dimensions = embedding_dimensions
@@ -205,7 +207,13 @@ class SingularityMemoryStorage:
         return self._search_local(workspace=workspace, query=query, limit=limit, lane="lexical")
 
     def search_vector(self, workspace: str, query: str, limit: int) -> list[MemoryCandidate]:
-        """Run the VectorChord semantic lane."""
+        """Run the VectorChord semantic lane.
+
+        Returns an empty list when ``vector_enabled`` is False so callers can
+        safely gate dense retrieval behind a single config flag.
+        """
+        if not self._vector_enabled:
+            return []
         if self._is_postgres_backend:
             return self._search_vector_postgres(workspace=workspace, query=query, limit=limit)
         return self._search_local(workspace=workspace, query=query, limit=limit, lane="vector")
@@ -305,18 +313,20 @@ class SingularityMemoryStorage:
             created_at=self._utc_now_isoformat(),
         )
         if self._is_postgres_backend:
-            # Generate embedding with error handling
-            try:
-                embedding = self._embedding_client.embed_text(content)
-                vector_literal = self._format_vector_literal(embedding)
-            except Exception as e:
-                logger.warning(
-                    f"Embedding generation failed for memory item, using zero vector: {e}",
-                    extra={"workspace": workspace, "source_uri": source_uri},
-                )
-                # Use zero vector as fallback to allow storage to proceed
-                embedding = [0.0] * self._embedding_dimensions
-                vector_literal = self._format_vector_literal(embedding)
+            # Embedding is optional: skip when the dense lane is disabled, leaving
+            # the column NULL so a later toggle-on can backfill it.
+            if not self._vector_enabled:
+                vector_literal = None
+            else:
+                try:
+                    embedding = self._embedding_client.embed_text(content)
+                    vector_literal = self._format_vector_literal(embedding)
+                except Exception as e:
+                    logger.warning(
+                        f"Embedding generation failed for memory item, leaving column NULL for backfill: {e}",
+                        extra={"workspace": workspace, "source_uri": source_uri},
+                    )
+                    vector_literal = None
             with self._connect() as connection:
                 with connection.cursor() as cursor:
                     cursor.execute(
@@ -439,6 +449,97 @@ class SingularityMemoryStorage:
         if self._pool is not None:
             self._pool.close()
 
+    def count_pending_embeddings(self, workspace: str | None = None) -> int:
+        """Return the number of stored items that still lack an embedding.
+
+        When ``workspace`` is None, counts across all workspaces. Returns 0
+        for the local-file backend (which has no embedding column).
+        """
+        if not self._is_postgres_backend:
+            return 0
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                if workspace is None:
+                    cur.execute(
+                        f"SELECT COUNT(*) FROM {SINGULARITY_MEMORY_ITEMS_TABLE} WHERE embedding IS NULL"
+                    )
+                else:
+                    cur.execute(
+                        f"SELECT COUNT(*) FROM {SINGULARITY_MEMORY_ITEMS_TABLE} "
+                        f"WHERE embedding IS NULL AND workspace = %s",
+                        (workspace,),
+                    )
+                row = cur.fetchone()
+        return int(row[0]) if row else 0
+
+    def backfill_embeddings(
+        self,
+        workspace: str | None = None,
+        batch_size: int = 32,
+        max_batches: int | None = None,
+    ) -> int:
+        """Embed every stored item that still lacks an embedding.
+
+        Idempotent: each call processes only rows where ``embedding IS NULL``.
+        Safe to interrupt; the next call resumes where the previous run
+        stopped. Returns the number of items embedded.
+
+        No-ops when the dense lane is disabled, when the backend is the
+        local-file fallback, or when there is nothing to backfill.
+        """
+        if not self._vector_enabled or not self._is_postgres_backend:
+            return 0
+
+        processed = 0
+        batches_done = 0
+        while True:
+            if max_batches is not None and batches_done >= max_batches:
+                break
+            with self._connect() as conn:
+                with conn.cursor() as cur:
+                    if workspace is None:
+                        cur.execute(
+                            f"SELECT memory_item_id, content FROM {SINGULARITY_MEMORY_ITEMS_TABLE} "
+                            f"WHERE embedding IS NULL ORDER BY created_at LIMIT %s",
+                            (batch_size,),
+                        )
+                    else:
+                        cur.execute(
+                            f"SELECT memory_item_id, content FROM {SINGULARITY_MEMORY_ITEMS_TABLE} "
+                            f"WHERE embedding IS NULL AND workspace = %s "
+                            f"ORDER BY created_at LIMIT %s",
+                            (workspace, batch_size),
+                        )
+                    rows = cur.fetchall()
+            if not rows:
+                break
+
+            for memory_item_id, content in rows:
+                try:
+                    embedding = self._embedding_client.embed_text(content)
+                    vector_literal = self._format_vector_literal(embedding)
+                except Exception:
+                    logger.exception(
+                        "Embedding backfill failed for memory item %s; skipping",
+                        memory_item_id,
+                    )
+                    continue
+                with self._connect() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            f"UPDATE {SINGULARITY_MEMORY_ITEMS_TABLE} "
+                            f"SET embedding = %s::vector "
+                            f"WHERE memory_item_id = %s",
+                            (vector_literal, memory_item_id),
+                        )
+                    conn.commit()
+                processed += 1
+
+            batches_done += 1
+            if len(rows) < batch_size:
+                break
+        return processed
+
     def _search_lexical_postgres(self, workspace: str, query: str, limit: int) -> list[MemoryCandidate]:
         """Run lexical retrieval using VectorChord-BM25."""
         with self._connect() as conn:
@@ -477,10 +578,16 @@ class SingularityMemoryStorage:
 
     def _search_vector_postgres(self, workspace: str, query: str, limit: int) -> list[MemoryCandidate]:
         """Run semantic retrieval using VectorChord.
-        
+
+        Returns an empty list when the dense lane is disabled. Skips rows
+        whose embedding hasn't been backfilled yet.
+
         Raises:
             Exception: If embedding generation fails (caller should handle gracefully)
         """
+        if not self._vector_enabled:
+            return []
+
         try:
             query_embedding = self._embedding_client.embed_text(query)
             vector_literal = self._format_vector_literal(query_embedding)
@@ -491,7 +598,7 @@ class SingularityMemoryStorage:
             )
             # Re-raise to allow caller to fall back to lexical search
             raise
-        
+
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -504,6 +611,7 @@ class SingularityMemoryStorage:
                         embedding <-> %s::vector AS vector_rank
                     FROM {SINGULARITY_MEMORY_ITEMS_TABLE}
                     WHERE workspace = %s
+                      AND embedding IS NOT NULL
                     ORDER BY vector_rank
                     LIMIT %s
                     """,
