@@ -3,10 +3,10 @@ import os
 import json
 import shutil
 from pathlib import Path
-from provider import HermesMemoryProvider
+from provider import SingularityMemoryProvider
 
 def smoke_test():
-    print("Starting hermes_memory smoke test...")
+    print("Starting singularity_memory smoke test...")
     
     # Setup temp home
     hermes_home = Path("/tmp/hermes_test_home")
@@ -17,7 +17,7 @@ def smoke_test():
     dsn = f"file://{hermes_home}/memory-store.json"
     
     # Create a dummy config
-    config_path = hermes_home / "hermes-memory.json"
+    config_path = hermes_home / "singularity-memory.json"
     config = {
         "dsn": dsn,
         "workspace": "test-space",
@@ -28,7 +28,7 @@ def smoke_test():
     }
     config_path.write_text(json.dumps(config))
     
-    provider = HermesMemoryProvider()
+    provider = SingularityMemoryProvider()
     print(f"Provider name: {provider.name}")
     
     # Initialize
@@ -36,16 +36,16 @@ def smoke_test():
     provider.initialize(session_id="test-session", hermes_home=str(hermes_home))
     
     # Test Tool call: store
-    print("Testing hermes_memory_store...")
+    print("Testing singularity_memory_store...")
     provider.handle_tool_call(
-        "hermes_memory_store", 
+        "singularity_memory_store", 
         {"content": "The secret code is 12345", "source_uri": "test://secret"}
     )
     
     # Test Tool call: search (Lexical)
-    print("Testing hermes_memory_search (Lexical)...")
+    print("Testing singularity_memory_search (Lexical)...")
     search_result = provider.handle_tool_call(
-        "hermes_memory_search",
+        "singularity_memory_search",
         {"query": "secret code"}
     )
     print(f"Search Result: {search_result}")

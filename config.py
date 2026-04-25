@@ -1,4 +1,4 @@
-"""Configuration helpers for the hermes_memory plugin.
+"""Configuration helpers for the singularity_memory plugin.
 
 ## Purpose
 Define provider-local configuration defaults and profile-scoped config file
@@ -33,20 +33,20 @@ DEFAULT_CONTEXT_TOKENS = 1800
 DEFAULT_RRF_K = 60
 DEFAULT_GRAPH_LIMIT = 4
 DEFAULT_DEEP_RERANK_TOP_N = 4
-DEFAULT_TOKENIZER_NAME = "hermes_memory_unicode"
-DEFAULT_VECTOR_INDEX_NAME = "hermes_memory_items_embedding_idx"
-DEFAULT_BM25_INDEX_NAME = "hermes_memory_items_bm25_idx"
+DEFAULT_TOKENIZER_NAME = "singularity_memory_unicode"
+DEFAULT_VECTOR_INDEX_NAME = "singularity_memory_items_embedding_idx"
+DEFAULT_BM25_INDEX_NAME = "singularity_memory_items_bm25_idx"
 DEFAULT_LEXICAL_WEIGHT = 1.0
 DEFAULT_VECTOR_WEIGHT = 1.0
 DEFAULT_GRAPH_WEIGHT = 1.0
-DEFAULT_GRAPH_NAME = "hermes_memory_graph"
+DEFAULT_GRAPH_NAME = "singularity_memory_graph"
 DEFAULT_POOL_MIN_SIZE = 1
 DEFAULT_POOL_MAX_SIZE = 4
-CONFIG_FILENAME = "hermes-memory.json"
+CONFIG_FILENAME = "singularity-memory.json"
 
 
-class HermesMemoryConfig(BaseModel):
-    """Profile-scoped configuration for the hermes_memory provider with validation."""
+class SingularityMemoryConfig(BaseModel):
+    """Profile-scoped configuration for the singularity_memory provider with validation."""
 
     dsn: str = Field(default="", description="Backend DSN (postgres:// or file://)")
     workspace: str = Field(default="hermes", min_length=1, max_length=256)
@@ -71,9 +71,13 @@ class HermesMemoryConfig(BaseModel):
     graph_limit: int = Field(default=DEFAULT_GRAPH_LIMIT, gt=0)
     graph_name: str = Field(default=DEFAULT_GRAPH_NAME, min_length=1)
     bootstrap_schema: bool = Field(default=True)
-    hindsight_enabled: bool = Field(default=False)
-    hindsight_profile: str = Field(default="hermes")
-    # LLM Gateway settings for Hindsight
+    server_url: str | None = Field(default=None, description="External Singularity Memory server URL; if set, plugin connects to it instead of starting one in-process")
+    server_embedded: bool = Field(default=False, description="Start an embedded Singularity Memory server in the Hermes process (ignored if server_url is set)")
+    server_mcp_enabled: bool = Field(default=True, description="Expose MCP at /mcp/ when running embedded")
+    server_host: str = Field(default="127.0.0.1")
+    server_port: int = Field(default=8888, gt=0, le=65535)
+    server_profile: str = Field(default="default")
+    # LLM Gateway settings for the Singularity Memory server
     llm_base_url: str = Field(default="")
     llm_api_key: str = Field(default="")
     llm_model: str = Field(default="qwen3.5-9b")
@@ -116,7 +120,7 @@ class HermesMemoryConfig(BaseModel):
         extra = "forbid"  # Prevent unknown fields
 
 
-def load_provider_config(hermes_home: str | Path) -> HermesMemoryConfig:
+def load_provider_config(hermes_home: str | Path) -> SingularityMemoryConfig:
     """Load the profile-scoped provider config from `$HERMES_HOME`.
     
     Uses Pydantic for automatic validation. Returns default config if file
@@ -128,16 +132,16 @@ def load_provider_config(hermes_home: str | Path) -> HermesMemoryConfig:
     """
     config_path = Path(hermes_home) / CONFIG_FILENAME
     if not config_path.exists():
-        return HermesMemoryConfig()
+        return SingularityMemoryConfig()
     
     try:
         with config_path.open("r", encoding="utf-8") as f:
             payload = json.load(f)
         # Pydantic will automatically validate via Field constraints
-        return HermesMemoryConfig(**payload)
+        return SingularityMemoryConfig(**payload)
     except (json.JSONDecodeError, TypeError) as e:
         # Fallback to default config if file is corrupted
-        return HermesMemoryConfig()
+        return SingularityMemoryConfig()
 
 
 
@@ -160,7 +164,7 @@ def save_provider_config(values: dict[str, Any], hermes_home: str | Path) -> Non
     current_payload.update(values)
     
     # Validate merged config
-    validated_config = HermesMemoryConfig(**current_payload)
+    validated_config = SingularityMemoryConfig(**current_payload)
     
     # Save validated config
     if hasattr(validated_config, 'model_dump'):

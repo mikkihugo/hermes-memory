@@ -1,3 +1,0 @@
-[submodule "deps/hindsight"]
-	path = deps/hindsight
-	url = https://github.com/vectorize-io/hindsight

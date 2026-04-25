@@ -1,4 +1,4 @@
-"""Storage backend for the hermes_memory provider.
+"""Storage backend for the singularity_memory provider.
 
 ## Purpose
 Provide a PostgreSQL-first backend with connection pooling, versioned schema
@@ -40,7 +40,7 @@ except ImportError:
 POSTGRESQL_DSN_PREFIX = "postgresql://"
 POSTGRES_DSN_PREFIX = "postgres://"
 FILE_DSN_PREFIX = "file://"
-DEFAULT_LOCAL_STORAGE_FILENAME = "hermes-memory.json"
+DEFAULT_LOCAL_STORAGE_FILENAME = "singularity-memory.json"
 DEFAULT_SOURCE_URI = "session://turn"
 CURRENT_SCHEMA_VERSION = 2
 MINIMUM_GRAPH_TOKEN_LENGTH = 3
@@ -56,6 +56,15 @@ except ImportError:
         return default
 
 
+def _model_to_dict(obj) -> dict:
+    """Serialize a pydantic BaseModel (or fallback BaseModel) to a plain dict."""
+    if hasattr(obj, "model_dump"):
+        return obj.model_dump()
+    if hasattr(obj, "dict") and callable(obj.dict):
+        return obj.dict()
+    return dict(vars(obj))
+
+
 MAX_SOURCE_URI_LENGTH = 2048  # Standard URL max length
 MAX_WORKSPACE_LENGTH = 256
 
@@ -63,11 +72,11 @@ MAX_WORKSPACE_LENGTH = 256
 BM25_TOPK_MULTIPLIER = 4  # Retrieve 4x requested limit for better ranking
 BM25_TOPK_MINIMUM = 100  # Always retrieve at least 100 candidates for BM25
 
-HERMES_MEMORY_ITEMS_TABLE = "hermes_memory_items"
-HERMES_MEMORY_TURNS_TABLE = "hermes_memory_turns"
-HERMES_MEMORY_FEEDBACK_TABLE = "hermes_memory_feedback"
-HERMES_MEMORY_SCHEMA_VERSION_TABLE = "hermes_memory_schema_version"
-HERMES_MEMORY_SCHEMA_NAME = "hermes_memory"
+SINGULARITY_MEMORY_ITEMS_TABLE = "singularity_memory_items"
+SINGULARITY_MEMORY_TURNS_TABLE = "singularity_memory_turns"
+SINGULARITY_MEMORY_FEEDBACK_TABLE = "singularity_memory_feedback"
+SINGULARITY_MEMORY_SCHEMA_VERSION_TABLE = "singularity_memory_schema_version"
+SINGULARITY_MEMORY_SCHEMA_NAME = "singularity_memory"
 
 
 class MemoryItemRecord(BaseModel):
@@ -101,8 +110,8 @@ class TurnRecord(BaseModel):
         frozen = True  # Immutable after creation
 
 
-class HermesMemoryStorageProtocol(Protocol):
-    """Backend contract for hermes_memory storage."""
+class SingularityMemoryStorageProtocol(Protocol):
+    """Backend contract for singularity_memory storage."""
 
     def search_lexical(self, workspace: str, query: str, limit: int) -> list[MemoryCandidate]:
         """Run the BM25 lexical lane."""
@@ -137,7 +146,7 @@ class HermesMemoryStorageProtocol(Protocol):
         ...
 
 
-class HermesMemoryStorage:
+class SingularityMemoryStorage:
     """Durable storage adapter for Hermes memory."""
 
     def __init__(
@@ -224,7 +233,7 @@ class HermesMemoryStorage:
                 with connection.cursor() as cursor:
                     cursor.execute(
                         f"""
-                        INSERT INTO {HERMES_MEMORY_TURNS_TABLE} (
+                        INSERT INTO {SINGULARITY_MEMORY_TURNS_TABLE} (
                             turn_id,
                             workspace,
                             session_id,
@@ -312,7 +321,7 @@ class HermesMemoryStorage:
                 with connection.cursor() as cursor:
                     cursor.execute(
                         f"""
-                        INSERT INTO {HERMES_MEMORY_ITEMS_TABLE} (
+                        INSERT INTO {SINGULARITY_MEMORY_ITEMS_TABLE} (
                             memory_item_id,
                             workspace,
                             content,
@@ -365,7 +374,7 @@ class HermesMemoryStorage:
                 with connection.cursor() as cursor:
                     cursor.execute(
                         f"""
-                        INSERT INTO {HERMES_MEMORY_FEEDBACK_TABLE} (
+                        INSERT INTO {SINGULARITY_MEMORY_FEEDBACK_TABLE} (
                             feedback_id,
                             memory_item_id,
                             helpful,
@@ -376,7 +385,7 @@ class HermesMemoryStorage:
                     )
                     cursor.execute(
                         f"""
-                        UPDATE {HERMES_MEMORY_ITEMS_TABLE}
+                        UPDATE {SINGULARITY_MEMORY_ITEMS_TABLE}
                         SET confidence = (
                             SELECT GREATEST(
                                 0.1,
@@ -387,7 +396,7 @@ class HermesMemoryStorage:
                                     - 0.1 * COALESCE(SUM(CASE WHEN helpful THEN 0 ELSE 1 END), 0)
                                 )
                             )
-                            FROM {HERMES_MEMORY_FEEDBACK_TABLE}
+                            FROM {SINGULARITY_MEMORY_FEEDBACK_TABLE}
                             WHERE memory_item_id = %s
                         ),
                         updated_at = NOW()
@@ -445,7 +454,7 @@ class HermesMemoryStorage:
                         source_uri,
                         confidence,
                         bm25 <&> to_bm25query(%s, tokenize(%s, %s)) AS bm25_rank
-                    FROM {HERMES_MEMORY_ITEMS_TABLE}
+                    FROM {SINGULARITY_MEMORY_ITEMS_TABLE}
                     WHERE workspace = %s
                     ORDER BY bm25_rank
                     LIMIT %s
@@ -493,7 +502,7 @@ class HermesMemoryStorage:
                         source_uri,
                         confidence,
                         embedding <-> %s::vector AS vector_rank
-                    FROM {HERMES_MEMORY_ITEMS_TABLE}
+                    FROM {SINGULARITY_MEMORY_ITEMS_TABLE}
                     WHERE workspace = %s
                     ORDER BY vector_rank
                     LIMIT %s
@@ -599,7 +608,7 @@ class HermesMemoryStorage:
         """Create the schema-version table when absent."""
         cursor.execute(
             f"""
-            CREATE TABLE IF NOT EXISTS {HERMES_MEMORY_SCHEMA_VERSION_TABLE} (
+            CREATE TABLE IF NOT EXISTS {SINGULARITY_MEMORY_SCHEMA_VERSION_TABLE} (
                 schema_name TEXT PRIMARY KEY,
                 version INTEGER NOT NULL
             )
@@ -611,10 +620,10 @@ class HermesMemoryStorage:
         cursor.execute(
             f"""
             SELECT version
-            FROM {HERMES_MEMORY_SCHEMA_VERSION_TABLE}
+            FROM {SINGULARITY_MEMORY_SCHEMA_VERSION_TABLE}
             WHERE schema_name = %s
             """,
-            (HERMES_MEMORY_SCHEMA_NAME,),
+            (SINGULARITY_MEMORY_SCHEMA_NAME,),
         )
         row = cursor.fetchone()
         if row is None:
@@ -625,12 +634,12 @@ class HermesMemoryStorage:
         """Persist the current schema version."""
         cursor.execute(
             f"""
-            INSERT INTO {HERMES_MEMORY_SCHEMA_VERSION_TABLE} (schema_name, version)
+            INSERT INTO {SINGULARITY_MEMORY_SCHEMA_VERSION_TABLE} (schema_name, version)
             VALUES (%s, %s)
             ON CONFLICT (schema_name)
             DO UPDATE SET version = EXCLUDED.version
             """,
-            (HERMES_MEMORY_SCHEMA_NAME, version),
+            (SINGULARITY_MEMORY_SCHEMA_NAME, version),
         )
 
     def _apply_schema_migration_v1(self, cursor: Cursor[Any]) -> None:
@@ -641,7 +650,7 @@ class HermesMemoryStorage:
         cursor.execute("CREATE EXTENSION IF NOT EXISTS vchord_bm25 CASCADE")
         cursor.execute(
             f"""
-            CREATE TABLE IF NOT EXISTS {HERMES_MEMORY_ITEMS_TABLE} (
+            CREATE TABLE IF NOT EXISTS {SINGULARITY_MEMORY_ITEMS_TABLE} (
                 memory_item_id TEXT PRIMARY KEY,
                 workspace TEXT NOT NULL,
                 content TEXT NOT NULL,
@@ -656,7 +665,7 @@ class HermesMemoryStorage:
         )
         cursor.execute(
             f"""
-            CREATE TABLE IF NOT EXISTS {HERMES_MEMORY_TURNS_TABLE} (
+            CREATE TABLE IF NOT EXISTS {SINGULARITY_MEMORY_TURNS_TABLE} (
                 turn_id TEXT PRIMARY KEY,
                 workspace TEXT NOT NULL,
                 session_id TEXT NOT NULL,
@@ -668,9 +677,9 @@ class HermesMemoryStorage:
         )
         cursor.execute(
             f"""
-            CREATE TABLE IF NOT EXISTS {HERMES_MEMORY_FEEDBACK_TABLE} (
+            CREATE TABLE IF NOT EXISTS {SINGULARITY_MEMORY_FEEDBACK_TABLE} (
                 feedback_id TEXT PRIMARY KEY,
-                memory_item_id TEXT NOT NULL REFERENCES {HERMES_MEMORY_ITEMS_TABLE}(memory_item_id),
+                memory_item_id TEXT NOT NULL REFERENCES {SINGULARITY_MEMORY_ITEMS_TABLE}(memory_item_id),
                 helpful BOOLEAN NOT NULL,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
@@ -696,20 +705,20 @@ class HermesMemoryStorage:
         )
         cursor.execute(
             f"CREATE INDEX IF NOT EXISTS {self._vector_index_name} "
-            f"ON {HERMES_MEMORY_ITEMS_TABLE} USING vchordrq (embedding vector_l2_ops)"
+            f"ON {SINGULARITY_MEMORY_ITEMS_TABLE} USING vchordrq (embedding vector_l2_ops)"
         )
         cursor.execute(
             f"CREATE INDEX IF NOT EXISTS {self._bm25_index_name} "
-            f"ON {HERMES_MEMORY_ITEMS_TABLE} USING bm25 (bm25 bm25_ops)"
+            f"ON {SINGULARITY_MEMORY_ITEMS_TABLE} USING bm25 (bm25 bm25_ops)"
         )
         cursor.execute(
-            f"CREATE INDEX IF NOT EXISTS {HERMES_MEMORY_ITEMS_TABLE}_workspace_idx "
-            f"ON {HERMES_MEMORY_ITEMS_TABLE} (workspace)"
+            f"CREATE INDEX IF NOT EXISTS {SINGULARITY_MEMORY_ITEMS_TABLE}_workspace_idx "
+            f"ON {SINGULARITY_MEMORY_ITEMS_TABLE} (workspace)"
         )
         # Add index on feedback table for performance
         cursor.execute(
-            f"CREATE INDEX IF NOT EXISTS {HERMES_MEMORY_FEEDBACK_TABLE}_memory_item_id_idx "
-            f"ON {HERMES_MEMORY_FEEDBACK_TABLE} (memory_item_id)"
+            f"CREATE INDEX IF NOT EXISTS {SINGULARITY_MEMORY_FEEDBACK_TABLE}_memory_item_id_idx "
+            f"ON {SINGULARITY_MEMORY_FEEDBACK_TABLE} (memory_item_id)"
         )
 
     @contextmanager

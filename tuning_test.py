@@ -3,11 +3,11 @@ import os
 import json
 import shutil
 from pathlib import Path
-from provider import HermesMemoryProvider
+from provider import SingularityMemoryProvider
 from retrieval import MemoryCandidate
 
 def tuning_test():
-    print("Starting hermes_memory tuning test (RRF weights)...")
+    print("Starting singularity_memory tuning test (RRF weights)...")
     
     hermes_home = Path("/tmp/hermes_tuning_test")
     if hermes_home.exists():
@@ -21,7 +21,7 @@ def tuning_test():
     # Item B is Rank 1 in Vector
     # If Lexical weight is 2.0 and Vector weight is 1.0, Item A should win.
     
-    config_path = hermes_home / "hermes-memory.json"
+    config_path = hermes_home / "singularity-memory.json"
     config = {
         "dsn": dsn,
         "lexical_weight": 2.0,
@@ -31,7 +31,7 @@ def tuning_test():
     }
     config_path.write_text(json.dumps(config))
     
-    provider = HermesMemoryProvider()
+    provider = SingularityMemoryProvider()
     provider.initialize(session_id="tuning-session", hermes_home=str(hermes_home))
     
     # Mock some candidates

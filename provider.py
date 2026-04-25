@@ -1,4 +1,4 @@
-"""Hermes MemoryProvider implementation for hermes_memory.
+"""Singularity MemoryProvider implementation for singularity_memory.
 
 ## Purpose
 Provide a real Hermes-compatible external memory provider backed by
@@ -21,32 +21,32 @@ except ImportError:
 
 
 try:
-    from .config import HermesMemoryConfig, load_provider_config, save_provider_config
+    from .config import SingularityMemoryConfig, load_provider_config, save_provider_config
     from .install import install_plugin, resolve_install_path
     from .metrics import ProviderMetricsCollector
     from .retrieval import format_context_block_with_token_budget, fuse_candidate_groups
     from .reranker import OpenAICompatibleRerankerClient, RerankerClientConfig
     from .schemas import ALL_TOOL_SCHEMAS
-    from .storage import HermesMemoryStorage
-    from .admin import HermesMemoryAdmin
+    from .storage import SingularityMemoryStorage
+    from .admin import SingularityMemoryAdmin
 except ImportError:
-    from config import HermesMemoryConfig, load_provider_config, save_provider_config
+    from config import SingularityMemoryConfig, load_provider_config, save_provider_config
     from install import install_plugin, resolve_install_path
     from metrics import ProviderMetricsCollector
     from retrieval import format_context_block_with_token_budget, fuse_candidate_groups
     from reranker import OpenAICompatibleRerankerClient, RerankerClientConfig
     from schemas import ALL_TOOL_SCHEMAS
-    from storage import HermesMemoryStorage
-    from admin import HermesMemoryAdmin
+    from storage import SingularityMemoryStorage
+    from admin import SingularityMemoryAdmin
 
 
 logger = logging.getLogger(__name__)
-TOOL_NAME_SEARCH = "hermes_memory_search"
-TOOL_NAME_CONTEXT = "hermes_memory_context"
-TOOL_NAME_STORE = "hermes_memory_store"
-TOOL_NAME_FEEDBACK = "hermes_memory_feedback"
-TOOL_NAME_GRAPH = "hermes_memory_graph"
-TOOL_NAME_METRICS = "hermes_memory_metrics"
+TOOL_NAME_SEARCH = "singularity_memory_search"
+TOOL_NAME_CONTEXT = "singularity_memory_context"
+TOOL_NAME_STORE = "singularity_memory_store"
+TOOL_NAME_FEEDBACK = "singularity_memory_feedback"
+TOOL_NAME_GRAPH = "singularity_memory_graph"
+TOOL_NAME_METRICS = "singularity_memory_metrics"
 TOOL_NAME_BANK_CREATE = "memory_bank_create"
 TOOL_NAME_BANK_DELETE = "memory_bank_delete"
 TOOL_NAME_BANK_LIST = "memory_bank_list"
@@ -67,14 +67,14 @@ OPERATION_FEEDBACK = "feedback"
 OPERATION_GRAPH = "graph"
 
 
-class HermesMemoryProvider(MemoryProvider):
+class SingularityMemoryProvider(MemoryProvider):
     """Postgres-first external memory provider for Hermes."""
 
     def __init__(self) -> None:
-        self._config = HermesMemoryConfig()
-        self._storage: HermesMemoryStorage | None = None
-        self._hindsight_client = None
-        self._admin: HermesMemoryAdmin | None = None
+        self._config = SingularityMemoryConfig()
+        self._storage: SingularityMemoryStorage | None = None
+        self._hindsight = None
+        self._admin: SingularityMemoryAdmin | None = None
         self._session_id = ""
         self._prefetch_lock = threading.Lock()
         self._prefetch_result = ""
@@ -82,18 +82,18 @@ class HermesMemoryProvider(MemoryProvider):
         self._rerankers: list[tuple[OpenAICompatibleRerankerClient, int | None]] = []
         self._metrics = ProviderMetricsCollector()
         self._system_prompt_block = (
-            "hermes_memory is active. Use it for durable cross-session recall "
+            "singularity_memory is active. Use it for durable cross-session recall "
             "about repos, infrastructure, decisions, incidents, and proven "
             "fixes. Retrieved memory is background context, not new user input. "
             "IMPORTANT: If the user says 'Magic Words' like 'Remember when...', "
             "'We did this before...', or 'Check our history...', you MUST "
-            "use hermes_memory_search or hermes_memory_context to recall specific episodes."
+            "use singularity_memory_search or singularity_memory_context to recall specific episodes."
         )
 
     @property
     def name(self) -> str:
         """Return the provider name."""
-        return "hermes_memory"
+        return "singularity_memory"
 
     def is_available(self) -> bool:
         """Return whether the provider has enough config to start."""
@@ -110,7 +110,7 @@ class HermesMemoryProvider(MemoryProvider):
         hermes_home = kwargs.get("hermes_home", "")
         self._session_id = session_id
         self._config = load_provider_config(hermes_home)
-        self._storage = HermesMemoryStorage(
+        self._storage = SingularityMemoryStorage(
             dsn=self._config.dsn,
             embedding_base_url=self._config.embedding_base_url,
             embedding_model=self._config.embedding_model,
@@ -125,65 +125,64 @@ class HermesMemoryProvider(MemoryProvider):
             graph_enabled=self._config.graph_enabled,
             graph_name=self._config.graph_name,
         )
-        if self._config.hindsight_enabled:
+        if self._config.server_url:
+            from singularity_memory_client import SingularityMemoryClient
+
+            self._hindsight = SingularityMemoryClient(base_url=self._config.server_url)
+            self._admin = SingularityMemoryAdmin(self._hindsight)
+        elif self._config.server_embedded:
             import os
-            import sys
-            from pathlib import Path
-
-            # Add vendored to Python path so hindsight_api can be imported
-            vendored_path = str(Path(__file__).parent / "vendored")
-            if vendored_path not in sys.path:
-                sys.path.insert(0, vendored_path)
-
-            # Set Hindsight API environment variables
-            os.environ["HINDSIGHT_API_DATABASE_URL"] = self._config.dsn
-            os.environ["HINDSIGHT_API_LLM_PROVIDER"] = "openai"
-            os.environ["HINDSIGHT_API_LLM_BASE_URL"] = self._config.llm_base_url or "https://llm-gateway.centralcloud.com/v1"
-            os.environ["HINDSIGHT_API_LLM_API_KEY"] = self._config.llm_api_key or ""
-            os.environ["HINDSIGHT_API_LLM_MODEL"] = self._config.llm_model or "qwen3.5-9b"
-            os.environ["HINDSIGHT_API_EMBEDDINGS_OPENAI_BASE_URL"] = self._config.embedding_base_url
-            os.environ["HINDSIGHT_API_EMBEDDINGS_OPENAI_MODEL"] = self._config.embedding_model
-            os.environ["HINDSIGHT_API_EMBEDDINGS_OPENAI_API_KEY"] = self._config.embedding_api_key or ""
-            os.environ["HINDSIGHT_API_RERANKER_PROVIDER"] = "openai"
-            os.environ["HINDSIGHT_API_RERANKER_OPENAI_BASE_URL"] = self._config.rerank_base_url
-            os.environ["HINDSIGHT_API_RERANKER_OPENAI_API_KEY"] = self._config.rerank_api_key or ""
-            os.environ["HINDSIGHT_API_RERANKER_OPENAI_MODEL"] = self._config.rerank_model or ""
-            os.environ["HINDSIGHT_API_VECTOR_EXTENSION"] = "vchord"
-            os.environ["HINDSIGHT_API_TEXT_SEARCH_EXTENSION"] = "vchord"
-            os.environ["TOKENIZERS_PARALLELISM"] = "false"
-
             import threading
             import time
             import urllib.request
 
-            from hindsight_api import MemoryEngine
-            from hindsight_api.api import create_app
+            os.environ["SINGULARITY_DATABASE_URL"] = self._config.dsn
+            os.environ["SINGULARITY_LLM_PROVIDER"] = "openai"
+            os.environ["SINGULARITY_LLM_BASE_URL"] = self._config.llm_base_url or "https://llm-gateway.centralcloud.com/v1"
+            os.environ["SINGULARITY_LLM_API_KEY"] = self._config.llm_api_key or ""
+            os.environ["SINGULARITY_LLM_MODEL"] = self._config.llm_model or "qwen3.5-9b"
+            os.environ["SINGULARITY_EMBEDDINGS_OPENAI_BASE_URL"] = self._config.embedding_base_url
+            os.environ["SINGULARITY_EMBEDDINGS_OPENAI_MODEL"] = self._config.embedding_model
+            os.environ["SINGULARITY_EMBEDDINGS_OPENAI_API_KEY"] = self._config.embedding_api_key or ""
+            os.environ["SINGULARITY_RERANKER_PROVIDER"] = "openai"
+            os.environ["SINGULARITY_RERANKER_OPENAI_BASE_URL"] = self._config.rerank_base_url
+            os.environ["SINGULARITY_RERANKER_OPENAI_API_KEY"] = self._config.rerank_api_key or ""
+            os.environ["SINGULARITY_RERANKER_OPENAI_MODEL"] = self._config.rerank_model or ""
+            os.environ["SINGULARITY_VECTOR_EXTENSION"] = "vchord"
+            os.environ["SINGULARITY_TEXT_SEARCH_EXTENSION"] = "vchord"
+            os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+            from singularity_memory_server import MemoryEngine
+            from singularity_memory_server.api import create_app
             import uvicorn
 
-            # Initialize engine
             engine = MemoryEngine(run_migrations=True)
+            app = create_app(
+                memory=engine,
+                http_api_enabled=True,
+                mcp_api_enabled=self._config.server_mcp_enabled,
+                initialize_memory=True,
+            )
 
-            # Create FastAPI app
-            app = create_app(memory=engine, http_api_enabled=True, mcp_api_enabled=False, initialize_memory=True)
+            host, port = self._config.server_host, self._config.server_port
 
             def run_server():
-                uvicorn.run(app, host="127.0.0.1", port=8888, log_level="error")
+                uvicorn.run(app, host=host, port=port, log_level="error")
 
-            server_thread = threading.Thread(target=run_server, daemon=True, name="hindsight-api")
+            server_thread = threading.Thread(target=run_server, daemon=True, name="singularity-memory-server")
             server_thread.start()
 
-            # Wait for server to be ready
             for _ in range(50):
                 try:
-                    urllib.request.urlopen("http://127.0.0.1:8888/v1/banks", timeout=1)
+                    urllib.request.urlopen(f"http://{host}:{port}/v1/banks", timeout=1)
                     break
                 except Exception:
                     time.sleep(0.2)
 
-            # Import and create HTTP client
-            from hindsight_client import Hindsight
-            self._hindsight = Hindsight(base_url="http://127.0.0.1:8888")
-            self._admin = HermesMemoryAdmin(self._hindsight)
+            from singularity_memory_client import SingularityMemoryClient
+
+            self._hindsight = SingularityMemoryClient(base_url=f"http://{host}:{port}")
+            self._admin = SingularityMemoryAdmin(self._hindsight)
         self._rerankers = self._build_reranker_pipeline()
 
     def system_prompt_block(self) -> str:
@@ -244,14 +243,14 @@ class HermesMemoryProvider(MemoryProvider):
             self._prefetch_thread = threading.Thread(
                 target=run_prefetch,
                 daemon=True,
-                name="hermes-memory-prefetch",
+                name="singularity-memory-prefetch",
             )
             self._prefetch_thread.start()
 
     def sync_turn(self, user_content: str, assistant_content: str, *, session_id: str = "") -> None:
         """Persist a completed turn."""
         started_at = self._metrics.start_operation()
-        if self._config.hindsight_enabled and self._hindsight:
+        if self._hindsight is not None:
             try:
                 self._hindsight.retain(
                     bank_id=self._config.workspace,
@@ -285,7 +284,7 @@ class HermesMemoryProvider(MemoryProvider):
     def handle_tool_call(self, tool_name: str, args: dict[str, Any], **kwargs) -> str:
         """Dispatch a provider-specific tool call."""
         if self._storage is None:
-            return json.dumps({"error": "hermes_memory is not initialized"})
+            return json.dumps({"error": "singularity_memory is not initialized"})
 
         handlers = {
             TOOL_NAME_SEARCH: self._handle_search,
@@ -367,7 +366,7 @@ class HermesMemoryProvider(MemoryProvider):
         if not content:
             return json.dumps({"error": "Missing required parameter: content"})
         
-        source_uri = str(args.get("source_uri", "manual://hermes_memory_store")).strip()
+        source_uri = str(args.get("source_uri", "manual://singularity_memory_store")).strip()
         memory_item_id = self._storage.store_memory_item(  # type: ignore[union-attr]
             workspace=self._config.workspace,
             content=content,
@@ -421,7 +420,7 @@ class HermesMemoryProvider(MemoryProvider):
 
     def _handle_bank_create(self, args: dict[str, Any]) -> str:
         if self._admin is None:
-            return json.dumps({"error": "hermes_memory is not initialized"})
+            return json.dumps({"error": "singularity_memory is not initialized"})
         name = str(args.get("name", "")).strip()
         if not name:
             return json.dumps({"error": "name is required"})
@@ -434,7 +433,7 @@ class HermesMemoryProvider(MemoryProvider):
 
     def _handle_bank_delete(self, args: dict[str, Any]) -> str:
         if self._admin is None:
-            return json.dumps({"error": "hermes_memory is not initialized"})
+            return json.dumps({"error": "singularity_memory is not initialized"})
         bank_id = str(args.get("bank_id", "")).strip()
         if not bank_id:
             return json.dumps({"error": "bank_id is required"})
@@ -446,7 +445,7 @@ class HermesMemoryProvider(MemoryProvider):
 
     def _handle_bank_list(self, args: dict[str, Any]) -> str:
         if self._admin is None:
-            return json.dumps({"error": "hermes_memory is not initialized"})
+            return json.dumps({"error": "singularity_memory is not initialized"})
         try:
             banks = self._admin.list_banks()
             return json.dumps({"banks": banks})
@@ -455,7 +454,7 @@ class HermesMemoryProvider(MemoryProvider):
 
     def _handle_bank_config_get(self, args: dict[str, Any]) -> str:
         if self._admin is None:
-            return json.dumps({"error": "hermes_memory is not initialized"})
+            return json.dumps({"error": "singularity_memory is not initialized"})
         bank_id = str(args.get("bank_id", "")).strip()
         if not bank_id:
             return json.dumps({"error": "bank_id is required"})
@@ -467,7 +466,7 @@ class HermesMemoryProvider(MemoryProvider):
 
     def _handle_bank_config_set(self, args: dict[str, Any]) -> str:
         if self._admin is None:
-            return json.dumps({"error": "hermes_memory is not initialized"})
+            return json.dumps({"error": "singularity_memory is not initialized"})
         bank_id = str(args.get("bank_id", "")).strip()
         if not bank_id:
             return json.dumps({"error": "bank_id is required"})
@@ -481,7 +480,7 @@ class HermesMemoryProvider(MemoryProvider):
 
     def _handle_stats(self, args: dict[str, Any]) -> str:
         if self._admin is None:
-            return json.dumps({"error": "hermes_memory is not initialized"})
+            return json.dumps({"error": "singularity_memory is not initialized"})
         bank_id = str(args.get("bank_id", "")).strip()
         if not bank_id:
             return json.dumps({"error": "bank_id is required"})
@@ -493,7 +492,7 @@ class HermesMemoryProvider(MemoryProvider):
 
     def _handle_browse(self, args: dict[str, Any]) -> str:
         if self._admin is None:
-            return json.dumps({"error": "hermes_memory is not initialized"})
+            return json.dumps({"error": "singularity_memory is not initialized"})
         bank_id = str(args.get("bank_id", "")).strip()
         if not bank_id:
             return json.dumps({"error": "bank_id is required"})
@@ -508,7 +507,7 @@ class HermesMemoryProvider(MemoryProvider):
 
     def _handle_search_debug(self, args: dict[str, Any]) -> str:
         if self._admin is None:
-            return json.dumps({"error": "hermes_memory is not initialized"})
+            return json.dumps({"error": "singularity_memory is not initialized"})
         bank_id = str(args.get("bank_id", "")).strip()
         query = str(args.get("query", "")).strip()
         if not bank_id or not query:
@@ -522,7 +521,7 @@ class HermesMemoryProvider(MemoryProvider):
 
     def _handle_entities(self, args: dict[str, Any]) -> str:
         if self._admin is None:
-            return json.dumps({"error": "hermes_memory is not initialized"})
+            return json.dumps({"error": "singularity_memory is not initialized"})
         bank_id = str(args.get("bank_id", "")).strip()
         if not bank_id:
             return json.dumps({"error": "bank_id is required"})
@@ -535,7 +534,7 @@ class HermesMemoryProvider(MemoryProvider):
 
     def _handle_audit(self, args: dict[str, Any]) -> str:
         if self._admin is None:
-            return json.dumps({"error": "hermes_memory is not initialized"})
+            return json.dumps({"error": "singularity_memory is not initialized"})
         bank_id = str(args.get("bank_id", "")).strip()
         if not bank_id:
             return json.dumps({"error": "bank_id is required"})
@@ -659,7 +658,7 @@ class HermesMemoryProvider(MemoryProvider):
             {
                 "key": "graph_name",
                 "description": "AGE graph name used for memory projection",
-                "default": "hermes_memory_graph",
+                "default": "singularity_memory_graph",
             },
             {
                 "key": "bootstrap_schema",
@@ -667,18 +666,38 @@ class HermesMemoryProvider(MemoryProvider):
                 "default": True,
             },
             {
-                "key": "hindsight_enabled",
-                "description": "Use Hindsight memory engine",
+                "key": "server_url",
+                "description": "External Singularity Memory server URL (e.g. http://localhost:8888). When set, the plugin uses the running standalone server instead of starting one in-process.",
+                "default": "",
+            },
+            {
+                "key": "server_embedded",
+                "description": "Start an embedded Singularity Memory server inside the Hermes process (ignored when server_url is set)",
                 "default": False,
             },
             {
-                "key": "hindsight_profile",
-                "description": "Hindsight profile name",
-                "default": "hermes",
+                "key": "server_mcp_enabled",
+                "description": "Expose MCP at /mcp/ when running the embedded server",
+                "default": True,
+            },
+            {
+                "key": "server_host",
+                "description": "Bind host for the embedded server",
+                "default": "127.0.0.1",
+            },
+            {
+                "key": "server_port",
+                "description": "Bind port for the embedded server",
+                "default": 8888,
+            },
+            {
+                "key": "server_profile",
+                "description": "Server profile name",
+                "default": "default",
             },
             {
                 "key": "llm_base_url",
-                "description": "LLM Gateway base URL for Hindsight (e.g. https://llm-gateway.centralcloud.com/v1)",
+                "description": "LLM Gateway base URL (e.g. https://llm-gateway.centralcloud.com/v1)",
                 "default": "",
             },
             {
@@ -709,7 +728,7 @@ class HermesMemoryProvider(MemoryProvider):
 
     def _search_and_fuse(self, query: str, limit: int) -> list[Any]:
         """Run lexical/vector retrieval, fuse, and optionally rerank."""
-        if self._config.hindsight_enabled and self._hindsight:
+        if self._hindsight is not None:
             try:
                 from .retrieval import MemoryCandidate
                 result = self._hindsight.recall(
@@ -721,14 +740,14 @@ class HermesMemoryProvider(MemoryProvider):
                     candidates.append(MemoryCandidate(
                         memory_item_id=res.id,
                         content=res.text,
-                        source_uri="hindsight",
+                        source_uri="singularity_memory",
                         confidence=1.0,
-                        rank=i+1,
-                        lane="hindsight"
+                        rank=i + 1,
+                        lane="singularity_memory",
                     ))
                 return candidates
             except Exception:
-                logger.warning("Hindsight recall failed; falling back to standard retrieval")
+                logger.warning("Singularity Memory recall failed; falling back to standard retrieval")
 
         lexical_candidates = []
         vector_candidates = []

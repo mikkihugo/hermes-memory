@@ -1,7 +1,7 @@
-"""CLI registration for the hermes_memory provider.
+"""CLI registration for the singularity_memory provider.
 
 ## Purpose
-Expose lightweight provider-local commands when hermes_memory is the active
+Expose lightweight provider-local commands when singularity_memory is the active
 memory plugin.
 """
 
@@ -22,7 +22,7 @@ def register_cli(subparser) -> None:
     )
 
 
-def hermes_memory_command(args) -> int:
+def singularity_memory_command(args) -> int:
     """Handle provider-local CLI actions."""
     if getattr(args, "show_config_path", False):
         print(CONFIG_FILENAME)

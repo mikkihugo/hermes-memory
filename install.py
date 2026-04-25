@@ -1,8 +1,8 @@
-"""Install helpers for the hermes_memory plugin.
+"""Install helpers for the singularity_memory plugin.
 
 ## Purpose
 Provide a deterministic local install path for the standalone provider repo so
-Hermes can discover it under `$HERMES_HOME/plugins/hermes_memory`.
+Hermes can discover it under `$HERMES_HOME/plugins/singularity_memory`.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ import shutil
 from pathlib import Path
 
 
-PLUGIN_DIRECTORY_NAME = "hermes_memory"
+PLUGIN_DIRECTORY_NAME = "singularity_memory"
 PLUGINS_DIRECTORY_NAME = "plugins"
 
 
@@ -21,7 +21,7 @@ def resolve_install_path(hermes_home: str | Path) -> Path:
 
 
 def install_plugin(source_directory: str | Path, hermes_home: str | Path, *, symlink: bool = True) -> Path:
-    """Install the plugin into `$HERMES_HOME/plugins/hermes_memory`.
+    """Install the plugin into `$HERMES_HOME/plugins/singularity_memory`.
 
     Args:
         source_directory: Standalone plugin repo directory.

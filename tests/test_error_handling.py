@@ -1,4 +1,4 @@
-"""Tests for error handling and edge cases in hermes-memory provider."""
+"""Tests for error handling and edge cases in singularity-memory provider."""
 
 from __future__ import annotations
 
@@ -13,9 +13,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from config import CONFIG_FILENAME, HermesMemoryConfig  # noqa: E402
-from provider import HermesMemoryProvider  # noqa: E402
-from storage import HermesMemoryStorage, MAX_CONTENT_LENGTH, MAX_SOURCE_URI_LENGTH, MAX_WORKSPACE_LENGTH  # noqa: E402
+from config import CONFIG_FILENAME, SingularityMemoryConfig  # noqa: E402
+from provider import SingularityMemoryProvider  # noqa: E402
+from storage import SingularityMemoryStorage, MAX_CONTENT_LENGTH, MAX_SOURCE_URI_LENGTH, MAX_WORKSPACE_LENGTH  # noqa: E402
 
 try:
     from pydantic import ValidationError
@@ -32,7 +32,7 @@ def _write_provider_config(hermes_home: Path, config_dict: dict) -> None:
     )
 
 
-def _create_initialized_provider(hermes_home: Path, dsn: str = None) -> HermesMemoryProvider:
+def _create_initialized_provider(hermes_home: Path, dsn: str = None) -> SingularityMemoryProvider:
     """Return one initialized provider."""
     storage_path = hermes_home / "memory-store.json"
     config = {
@@ -41,7 +41,7 @@ def _create_initialized_provider(hermes_home: Path, dsn: str = None) -> HermesMe
         "workspace": "test-workspace",
     }
     _write_provider_config(hermes_home, config)
-    provider = HermesMemoryProvider()
+    provider = SingularityMemoryProvider()
     provider.initialize(session_id="session-1", hermes_home=str(hermes_home))
     return provider
 
@@ -52,41 +52,41 @@ class TestConfigValidation:
     def test_invalid_dsn_prefix_raises_error(self, tmp_path: Path) -> None:
         """Invalid DSN prefix should raise ValidationError."""
         with pytest.raises((ValidationError, ValueError), match="DSN must start with"):
-            HermesMemoryConfig(dsn="invalid://path")
+            SingularityMemoryConfig(dsn="invalid://path")
     
     def test_negative_embedding_dimensions_raises_error(self, tmp_path: Path) -> None:
         """Negative embedding dimensions should raise ValidationError."""
         with pytest.raises((ValidationError, ValueError)):
-            HermesMemoryConfig(dsn="file://test", embedding_dimensions=-1)
+            SingularityMemoryConfig(dsn="file://test", embedding_dimensions=-1)
     
     def test_excessive_embedding_dimensions_raises_error(self, tmp_path: Path) -> None:
         """Excessive embedding dimensions should raise ValidationError."""
         with pytest.raises((ValidationError, ValueError)):
-            HermesMemoryConfig(dsn="file://test", embedding_dimensions=20000)
+            SingularityMemoryConfig(dsn="file://test", embedding_dimensions=20000)
     
     def test_negative_pool_size_raises_error(self, tmp_path: Path) -> None:
         """Negative pool size should raise ValidationError."""
         with pytest.raises((ValidationError, ValueError)):
-            HermesMemoryConfig(dsn="file://test", pool_min_size=-1)
+            SingularityMemoryConfig(dsn="file://test", pool_min_size=-1)
     
     def test_invalid_pool_size_range_raises_error(self, tmp_path: Path) -> None:
         """Invalid pool size range should raise ValidationError."""
         with pytest.raises((ValidationError, ValueError)):
-            HermesMemoryConfig(dsn="file://test", pool_min_size=5, pool_max_size=2)
+            SingularityMemoryConfig(dsn="file://test", pool_min_size=5, pool_max_size=2)
     
     def test_zero_prefetch_limit_raises_error(self, tmp_path: Path) -> None:
         """Zero prefetch limit should raise ValidationError."""
         with pytest.raises((ValidationError, ValueError)):
-            HermesMemoryConfig(dsn="file://test", prefetch_limit=0)
+            SingularityMemoryConfig(dsn="file://test", prefetch_limit=0)
     
     def test_negative_rrf_k_raises_error(self, tmp_path: Path) -> None:
         """Negative RRF k should raise ValidationError."""
         with pytest.raises((ValidationError, ValueError)):
-            HermesMemoryConfig(dsn="file://test", rrf_k=-1)
+            SingularityMemoryConfig(dsn="file://test", rrf_k=-1)
     
     def test_valid_config_succeeds(self, tmp_path: Path) -> None:
         """Valid config should be accepted."""
-        config = HermesMemoryConfig(
+        config = SingularityMemoryConfig(
             dsn="file:///tmp/test.json",
             workspace="test",
             embedding_dimensions=512,
@@ -102,7 +102,7 @@ class TestConfigValidation:
         try:
             from pydantic import ValidationError
             with pytest.raises(ValidationError):
-                HermesMemoryConfig(unknown_field="value")  # type: ignore
+                SingularityMemoryConfig(unknown_field="value")  # type: ignore
         except ImportError:
             pytest.skip("Pydantic not available")
 
@@ -241,37 +241,37 @@ class TestCypherEscaping:
     
     def test_single_quotes_are_escaped(self, tmp_path: Path) -> None:
         """Single quotes should be escaped properly."""
-        from storage import HermesMemoryStorage
+        from storage import SingularityMemoryStorage
         
-        result = HermesMemoryStorage._to_cypher_string_literal("test'quote")
+        result = SingularityMemoryStorage._to_cypher_string_literal("test'quote")
         assert result == "'test\\'quote'"
     
     def test_backslashes_are_escaped(self, tmp_path: Path) -> None:
         """Backslashes should be escaped properly."""
-        from storage import HermesMemoryStorage
+        from storage import SingularityMemoryStorage
         
-        result = HermesMemoryStorage._to_cypher_string_literal("test\\slash")
+        result = SingularityMemoryStorage._to_cypher_string_literal("test\\slash")
         assert result == "'test\\\\slash'"
     
     def test_newlines_are_escaped(self, tmp_path: Path) -> None:
         """Newlines should be escaped properly."""
-        from storage import HermesMemoryStorage
+        from storage import SingularityMemoryStorage
         
-        result = HermesMemoryStorage._to_cypher_string_literal("test\nline")
+        result = SingularityMemoryStorage._to_cypher_string_literal("test\nline")
         assert result == "'test\\nline'"
     
     def test_complex_string_with_multiple_escapes(self, tmp_path: Path) -> None:
         """Complex strings with multiple special characters should be escaped."""
-        from storage import HermesMemoryStorage
+        from storage import SingularityMemoryStorage
         
-        result = HermesMemoryStorage._to_cypher_string_literal("test'quote\nline\\slash")
+        result = SingularityMemoryStorage._to_cypher_string_literal("test'quote\nline\\slash")
         assert result == "'test\\'quote\\nline\\\\slash'"
     
     def test_control_characters_are_escaped(self, tmp_path: Path) -> None:
         """Control characters should be escaped properly."""
-        from storage import HermesMemoryStorage
+        from storage import SingularityMemoryStorage
         
-        result = HermesMemoryStorage._to_cypher_string_literal("test\t\r\b\f")
+        result = SingularityMemoryStorage._to_cypher_string_literal("test\t\r\b\f")
         assert result == "'test\\t\\r\\b\\f'"
 
 
@@ -282,7 +282,7 @@ class TestToolErrorMessages:
         """Missing query parameter should return clear error message."""
         provider = _create_initialized_provider(tmp_path)
         
-        response = json.loads(provider.handle_tool_call("hermes_memory_search", {}))
+        response = json.loads(provider.handle_tool_call("singularity_memory_search", {}))
         assert "error" in response
         assert "query" in response["error"].lower()
     
@@ -290,7 +290,7 @@ class TestToolErrorMessages:
         """Missing content parameter should return clear error message."""
         provider = _create_initialized_provider(tmp_path)
         
-        response = json.loads(provider.handle_tool_call("hermes_memory_store", {}))
+        response = json.loads(provider.handle_tool_call("singularity_memory_store", {}))
         assert "error" in response
         assert "content" in response["error"].lower()
     

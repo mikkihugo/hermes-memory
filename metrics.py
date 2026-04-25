@@ -1,4 +1,4 @@
-"""Provider metrics for hermes_memory.
+"""Provider metrics for singularity_memory.
 
 ## Purpose
 Track provider-local operation counts, failures, and latencies so Hermes can

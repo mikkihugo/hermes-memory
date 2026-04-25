@@ -4,7 +4,7 @@ import json
 import shutil
 from pathlib import Path
 from unittest.mock import MagicMock
-from provider import HermesMemoryProvider
+from provider import SingularityMemoryProvider
 from retrieval import MemoryCandidate
 
 def setup_test_home():
@@ -15,15 +15,15 @@ def setup_test_home():
     return hermes_home
 
 def robust_fallback_test():
-    print("Starting hermes_memory robust fallback test...")
+    print("Starting singularity_memory robust fallback test...")
     hermes_home = setup_test_home()
     dsn = f"file://{hermes_home}/memory-store.json"
     
-    config_path = hermes_home / "hermes-memory.json"
+    config_path = hermes_home / "singularity-memory.json"
     config = {"dsn": dsn, "vector_enabled": True, "lexical_enabled": True}
     config_path.write_text(json.dumps(config))
     
-    provider = HermesMemoryProvider()
+    provider = SingularityMemoryProvider()
     provider.initialize(session_id="robust-session", hermes_home=str(hermes_home))
     
     # Mock storage

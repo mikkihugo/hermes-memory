@@ -1,12 +1,12 @@
-"""Tool schemas for the hermes-memory provider.
+"""Tool schemas for the singularity-memory provider.
 
 ## Purpose
 Describe the provider-specific tools Hermes exposes when this memory backend is
 active.
 """
 
-HERMES_MEMORY_SEARCH_SCHEMA = {
-    "name": "hermes_memory_search",
+SINGULARITY_MEMORY_SEARCH_SCHEMA = {
+    "name": "singularity_memory_search",
     "description": (
         "Search durable memory using fused lexical and semantic retrieval. "
         "Use this when you need specific prior facts, incidents, documents, or "
@@ -28,8 +28,8 @@ HERMES_MEMORY_SEARCH_SCHEMA = {
     },
 }
 
-HERMES_MEMORY_CONTEXT_SCHEMA = {
-    "name": "hermes_memory_context",
+SINGULARITY_MEMORY_CONTEXT_SCHEMA = {
+    "name": "singularity_memory_context",
     "description": (
         "Return a compact, prompt-ready memory context block assembled from "
         "fused retrieval results."
@@ -50,8 +50,8 @@ HERMES_MEMORY_CONTEXT_SCHEMA = {
     },
 }
 
-HERMES_MEMORY_STORE_SCHEMA = {
-    "name": "hermes_memory_store",
+SINGULARITY_MEMORY_STORE_SCHEMA = {
+    "name": "singularity_memory_store",
     "description": (
         "Store an explicit durable memory item in the Postgres memory backend. "
         "Use this for stable facts, lessons, and operational findings worth "
@@ -73,8 +73,8 @@ HERMES_MEMORY_STORE_SCHEMA = {
     },
 }
 
-HERMES_MEMORY_FEEDBACK_SCHEMA = {
-    "name": "hermes_memory_feedback",
+SINGULARITY_MEMORY_FEEDBACK_SCHEMA = {
+    "name": "singularity_memory_feedback",
     "description": (
         "Mark a retrieved memory as helpful or unhelpful so future ranking can "
         "improve."
@@ -95,8 +95,8 @@ HERMES_MEMORY_FEEDBACK_SCHEMA = {
     },
 }
 
-HERMES_MEMORY_GRAPH_SCHEMA = {
-    "name": "hermes_memory_graph",
+SINGULARITY_MEMORY_GRAPH_SCHEMA = {
+    "name": "singularity_memory_graph",
     "description": (
         "Query AGE-backed graph memory expansion for related memory items. "
         "Use this when you need relationship-aware recall around shared "
@@ -118,8 +118,8 @@ HERMES_MEMORY_GRAPH_SCHEMA = {
     },
 }
 
-HERMES_MEMORY_METRICS_SCHEMA = {
-    "name": "hermes_memory_metrics",
+SINGULARITY_MEMORY_METRICS_SCHEMA = {
+    "name": "singularity_memory_metrics",
     "description": (
         "Return provider-local metrics including operation counts, failures, "
         "and average latency."
@@ -132,7 +132,7 @@ HERMES_MEMORY_METRICS_SCHEMA = {
 
 # ── Admin tool schemas ─────────────────────────────────────────────────────────
 
-HERMES_MEMORY_BANK_CREATE_SCHEMA = {
+SINGULARITY_MEMORY_BANK_CREATE_SCHEMA = {
     "name": "memory_bank_create",
     "description": "Create a new memory bank with the given name and optional background context.",
     "parameters": {
@@ -151,7 +151,7 @@ HERMES_MEMORY_BANK_CREATE_SCHEMA = {
     },
 }
 
-HERMES_MEMORY_BANK_DELETE_SCHEMA = {
+SINGULARITY_MEMORY_BANK_DELETE_SCHEMA = {
     "name": "memory_bank_delete",
     "description": "Delete a memory bank and all its stored memories.",
     "parameters": {
@@ -166,7 +166,7 @@ HERMES_MEMORY_BANK_DELETE_SCHEMA = {
     },
 }
 
-HERMES_MEMORY_BANK_LIST_SCHEMA = {
+SINGULARITY_MEMORY_BANK_LIST_SCHEMA = {
     "name": "memory_bank_list",
     "description": "List all memory banks and their profiles.",
     "parameters": {
@@ -175,7 +175,7 @@ HERMES_MEMORY_BANK_LIST_SCHEMA = {
     },
 }
 
-HERMES_MEMORY_BANK_CONFIG_GET_SCHEMA = {
+SINGULARITY_MEMORY_BANK_CONFIG_GET_SCHEMA = {
     "name": "memory_bank_config_get",
     "description": "Get the full resolved configuration for a memory bank.",
     "parameters": {
@@ -190,7 +190,7 @@ HERMES_MEMORY_BANK_CONFIG_GET_SCHEMA = {
     },
 }
 
-HERMES_MEMORY_BANK_CONFIG_SET_SCHEMA = {
+SINGULARITY_MEMORY_BANK_CONFIG_SET_SCHEMA = {
     "name": "memory_bank_config_set",
     "description": (
         "Update bank configuration overrides such as mission, disposition traits, "
@@ -236,7 +236,7 @@ HERMES_MEMORY_BANK_CONFIG_SET_SCHEMA = {
     },
 }
 
-HERMES_MEMORY_STATS_SCHEMA = {
+SINGULARITY_MEMORY_STATS_SCHEMA = {
     "name": "memory_stats",
     "description": "Get statistics about nodes, links, and operations for a memory bank.",
     "parameters": {
@@ -251,7 +251,7 @@ HERMES_MEMORY_STATS_SCHEMA = {
     },
 }
 
-HERMES_MEMORY_BROWSE_SCHEMA = {
+SINGULARITY_MEMORY_BROWSE_SCHEMA = {
     "name": "memory_browse",
     "description": (
         "Browse memory items in a bank with pagination and optional fact-type filter. "
@@ -283,7 +283,7 @@ HERMES_MEMORY_BROWSE_SCHEMA = {
     },
 }
 
-HERMES_MEMORY_SEARCH_DEBUG_SCHEMA = {
+SINGULARITY_MEMORY_SEARCH_DEBUG_SCHEMA = {
     "name": "memory_search_debug",
     "description": (
         "Search memories with a full retrieval trace showing all methods and scores. "
@@ -310,7 +310,7 @@ HERMES_MEMORY_SEARCH_DEBUG_SCHEMA = {
     },
 }
 
-HERMES_MEMORY_ENTITIES_SCHEMA = {
+SINGULARITY_MEMORY_ENTITIES_SCHEMA = {
     "name": "memory_entities",
     "description": "Get the entity graph for a memory bank.",
     "parameters": {
@@ -330,7 +330,7 @@ HERMES_MEMORY_ENTITIES_SCHEMA = {
     },
 }
 
-HERMES_MEMORY_AUDIT_SCHEMA = {
+SINGULARITY_MEMORY_AUDIT_SCHEMA = {
     "name": "memory_audit",
     "description": "Get the audit log for a memory bank, showing recent operations.",
     "parameters": {
@@ -351,20 +351,20 @@ HERMES_MEMORY_AUDIT_SCHEMA = {
 }
 
 ALL_TOOL_SCHEMAS = [
-    HERMES_MEMORY_SEARCH_SCHEMA,
-    HERMES_MEMORY_CONTEXT_SCHEMA,
-    HERMES_MEMORY_STORE_SCHEMA,
-    HERMES_MEMORY_FEEDBACK_SCHEMA,
-    HERMES_MEMORY_GRAPH_SCHEMA,
-    HERMES_MEMORY_METRICS_SCHEMA,
-    HERMES_MEMORY_BANK_CREATE_SCHEMA,
-    HERMES_MEMORY_BANK_DELETE_SCHEMA,
-    HERMES_MEMORY_BANK_LIST_SCHEMA,
-    HERMES_MEMORY_BANK_CONFIG_GET_SCHEMA,
-    HERMES_MEMORY_BANK_CONFIG_SET_SCHEMA,
-    HERMES_MEMORY_STATS_SCHEMA,
-    HERMES_MEMORY_BROWSE_SCHEMA,
-    HERMES_MEMORY_SEARCH_DEBUG_SCHEMA,
-    HERMES_MEMORY_ENTITIES_SCHEMA,
-    HERMES_MEMORY_AUDIT_SCHEMA,
+    SINGULARITY_MEMORY_SEARCH_SCHEMA,
+    SINGULARITY_MEMORY_CONTEXT_SCHEMA,
+    SINGULARITY_MEMORY_STORE_SCHEMA,
+    SINGULARITY_MEMORY_FEEDBACK_SCHEMA,
+    SINGULARITY_MEMORY_GRAPH_SCHEMA,
+    SINGULARITY_MEMORY_METRICS_SCHEMA,
+    SINGULARITY_MEMORY_BANK_CREATE_SCHEMA,
+    SINGULARITY_MEMORY_BANK_DELETE_SCHEMA,
+    SINGULARITY_MEMORY_BANK_LIST_SCHEMA,
+    SINGULARITY_MEMORY_BANK_CONFIG_GET_SCHEMA,
+    SINGULARITY_MEMORY_BANK_CONFIG_SET_SCHEMA,
+    SINGULARITY_MEMORY_STATS_SCHEMA,
+    SINGULARITY_MEMORY_BROWSE_SCHEMA,
+    SINGULARITY_MEMORY_SEARCH_DEBUG_SCHEMA,
+    SINGULARITY_MEMORY_ENTITIES_SCHEMA,
+    SINGULARITY_MEMORY_AUDIT_SCHEMA,
 ]

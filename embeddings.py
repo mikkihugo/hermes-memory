@@ -1,4 +1,4 @@
-"""Embedding client for the hermes_memory provider.
+"""Embedding client for the singularity_memory provider.
 
 ## Purpose
 Generate dense embeddings through the OpenAI-compatible `v1/embeddings`

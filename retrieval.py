@@ -1,4 +1,4 @@
-"""Retrieval helpers for the hermes-memory provider.
+"""Retrieval helpers for the singularity-memory provider.
 
 ## Purpose
 Provide deterministic reciprocal-rank fusion and context formatting for the

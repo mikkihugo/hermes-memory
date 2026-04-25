@@ -1,11 +1,11 @@
-"""Plugin entrypoint for hermes_memory."""
+"""Plugin entrypoint for singularity_memory."""
 
 try:
-    from .provider import HermesMemoryProvider
+    from .provider import SingularityMemoryProvider
 except ImportError:
-    from provider import HermesMemoryProvider
+    from provider import SingularityMemoryProvider
 
 
 def register(ctx) -> None:
-    """Register hermes_memory as a Hermes memory provider."""
-    ctx.register_memory_provider(HermesMemoryProvider())
+    """Register singularity_memory as a Hermes memory provider."""
+    ctx.register_memory_provider(SingularityMemoryProvider())

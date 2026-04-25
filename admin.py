@@ -1,17 +1,20 @@
-"""HermesMemoryAdmin - Admin operations for the Hindsight memory backend."""
+"""SingularityMemoryAdmin - Admin operations for the Singularity Memory backend."""
 
 import json
 from typing import Any
 
 
-class HermesMemoryAdmin:
-    """Wrap the Hindsight HTTP client for admin operations.
+class SingularityMemoryAdmin:
+    """Wrap the Singularity Memory HTTP client for admin operations.
 
     All methods use synchronous urllib because we may be called from sync contexts.
+    Reads the base URL from the underlying client so it works whether the
+    server is embedded in-process or running on a remote host.
     """
 
-    def __init__(self, hindsight_client) -> None:
-        self._hindsight = hindsight_client
+    def __init__(self, server_client) -> None:
+        self._client = server_client
+        self._base_url = getattr(server_client, "_base_url", "http://127.0.0.1:8888").rstrip("/")
 
     # ── Banks ──────────────────────────────────────────────────────────
 
@@ -21,7 +24,7 @@ class HermesMemoryAdmin:
 
         data = json.dumps({"name": name, "background": background}).encode()
         req = urllib.request.Request(
-            "http://127.0.0.1:8888/v1/default/banks",
+            f"{self._base_url}/v1/default/banks",
             data=data,
             headers={"Content-Type": "application/json"},
             method="POST",
@@ -35,7 +38,7 @@ class HermesMemoryAdmin:
         import urllib.request
 
         req = urllib.request.Request(
-            f"http://127.0.0.1:8888/v1/default/banks/{bank_id}",
+            f"{self._base_url}/v1/default/banks/{bank_id}",
             method="DELETE",
         )
         with urllib.request.urlopen(req) as resp:
@@ -45,7 +48,7 @@ class HermesMemoryAdmin:
         """List all banks."""
         import urllib.request
 
-        req = urllib.request.Request("http://127.0.0.1:8888/v1/default/banks")
+        req = urllib.request.Request(f"{self._base_url}/v1/default/banks")
         with urllib.request.urlopen(req) as resp:
             result = json.loads(resp.read())
             return result.get("banks", [])
@@ -54,7 +57,7 @@ class HermesMemoryAdmin:
         """Get bank configuration."""
         import urllib.request
 
-        req = urllib.request.Request(f"http://127.0.0.1:8888/v1/default/banks/{bank_id}/config")
+        req = urllib.request.Request(f"{self._base_url}/v1/default/banks/{bank_id}/config")
         with urllib.request.urlopen(req) as resp:
             return json.loads(resp.read())
 
@@ -64,7 +67,7 @@ class HermesMemoryAdmin:
 
         data = json.dumps(kwargs).encode()
         req = urllib.request.Request(
-            f"http://127.0.0.1:8888/v1/default/banks/{bank_id}/config",
+            f"{self._base_url}/v1/default/banks/{bank_id}/config",
             data=data,
             headers={"Content-Type": "application/json"},
             method="PATCH",
@@ -78,7 +81,7 @@ class HermesMemoryAdmin:
         """Get bank statistics."""
         import urllib.request
 
-        req = urllib.request.Request(f"http://127.0.0.1:8888/v1/default/banks/{bank_id}/stats")
+        req = urllib.request.Request(f"{self._base_url}/v1/default/banks/{bank_id}/stats")
         with urllib.request.urlopen(req) as resp:
             return json.loads(resp.read())
 
@@ -98,7 +101,7 @@ class HermesMemoryAdmin:
         if fact_type:
             params += f"&type={fact_type}"
         req = urllib.request.Request(
-            f"http://127.0.0.1:8888/v1/default/banks/{bank_id}/memories/list?{params}"
+            f"{self._base_url}/v1/default/banks/{bank_id}/memories/list?{params}"
         )
         with urllib.request.urlopen(req) as resp:
             return json.loads(resp.read())
@@ -110,7 +113,7 @@ class HermesMemoryAdmin:
         import urllib.request
 
         req = urllib.request.Request(
-            f"http://127.0.0.1:8888/v1/default/banks/{bank_id}/memories/recall",
+            f"{self._base_url}/v1/default/banks/{bank_id}/memories/recall",
             data=json.dumps({"query": query, "trace": show_trace}).encode(),
             headers={"Content-Type": "application/json"},
             method="POST",
@@ -125,7 +128,7 @@ class HermesMemoryAdmin:
         import urllib.request
 
         req = urllib.request.Request(
-            f"http://127.0.0.1:8888/v1/default/banks/{bank_id}/entities?limit={limit}"
+            f"{self._base_url}/v1/default/banks/{bank_id}/entities?limit={limit}"
         )
         with urllib.request.urlopen(req) as resp:
             return json.loads(resp.read())
@@ -137,7 +140,7 @@ class HermesMemoryAdmin:
         import urllib.request
 
         req = urllib.request.Request(
-            f"http://127.0.0.1:8888/v1/default/banks/{bank_id}/audit-logs?limit={limit}"
+            f"{self._base_url}/v1/default/banks/{bank_id}/audit-logs?limit={limit}"
         )
         with urllib.request.urlopen(req) as resp:
             return json.loads(resp.read())

@@ -1,4 +1,4 @@
-"""Reranker client for the hermes_memory provider.
+"""Reranker client for the singularity_memory provider.
 
 ## Purpose
 Provide an optional post-fusion rerank step against an OpenAI-like
