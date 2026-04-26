@@ -50,13 +50,11 @@ class SingularityMemoryConfig(BaseModel):
 
     dsn: str = Field(default="", description="Backend DSN (postgres:// or file://)")
     workspace: str = Field(default="hermes", min_length=1, max_length=256)
-    embedding_provider: str = Field(default="none", description="Embedding provider: 'none' (no dense lane) or 'openai' (OpenAI-compatible HTTP endpoint)")
     embedding_base_url: str = Field(default=DEFAULT_EMBEDDING_BASE_URL)
     embedding_model: str = Field(default=DEFAULT_EMBEDDING_MODEL)
     embedding_dimensions: int = Field(default=DEFAULT_EMBEDDING_DIMENSIONS, gt=0, le=10000)
     embedding_api_key: str | None = Field(default=None)
     embedding_backfill_batch_size: int = Field(default=32, gt=0, le=512, description="Batch size for auto-backfill of existing rows when vector_enabled is flipped on")
-    reranker_provider: str = Field(default="none", description="Reranker provider: 'none' (skip reranking) or 'openai' (OpenAI-compatible HTTP endpoint)")
     rerank_enabled: bool = Field(default=False)
     rerank_base_url: str = Field(default=DEFAULT_RERANK_BASE_URL)
     rerank_model: str = Field(default="")
