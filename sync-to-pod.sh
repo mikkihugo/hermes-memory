@@ -1,7 +1,8 @@
 #!/bin/bash
 set -e
 REMOTE_HOST="portal-automation"
-LOCAL_DIR="/home/mhugo/code/singularity_memory"
+# Sync only the Hermes-plugin subset of the repo into the Hermes plugin path.
+LOCAL_DIR="/home/mhugo/code/singularity_memory/extensions/hermes"
 POD_PATH="/opt/data/plugins/singularity_memory"
 
 echo "Step 1: Rsync to jump host..."
