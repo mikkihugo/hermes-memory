@@ -1,0 +1,7 @@
+name: singularity_memory
+version: 0.2.0
+description: Singularity Memory - Postgres-first memory provider with VectorChord, BM25, RRF fusion, and a standalone MCP+HTTP server
+author: mhugo
+provides:
+  hooks: false
+  tools: false

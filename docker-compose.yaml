@@ -1,18 +1,64 @@
 services:
-  hermes-postgres:
+  singularity-postgres:
     image: postgres:15
     environment:
-      POSTGRES_USER: hermes
+      POSTGRES_USER: singularity
       POSTGRES_PASSWORD: password
-      POSTGRES_DB: hermes_memory
+      POSTGRES_DB: singularity_memory
     ports:
       - "5432:5432"
     volumes:
-      - hermes-db-data:/var/lib/postgresql/data
-    # Note: For production use, you'll need an image containing 
+      - singularity-db-data:/var/lib/postgresql/data
+    # Note: For production use, you'll need an image containing
     # pgvector, vchord, and apache-age extensions.
     command: >
       sh -c "docker-entrypoint.sh postgres"
 
+  # Standalone Singularity Memory server, backed by the Postgres above.
+  # Run: docker compose up -d singularity-postgres singularity-memory
+  singularity-memory:
+    image: python:3.11-slim
+    working_dir: /app
+    volumes:
+      - .:/app
+    environment:
+      SINGULARITY_DATABASE_URL: postgresql://singularity:password@singularity-postgres:5432/singularity_memory
+      SINGULARITY_MCP_ENABLED: "true"
+      SINGULARITY_HOST: "0.0.0.0"
+      SINGULARITY_PORT: "8888"
+      SINGULARITY_LLM_API_KEY: ${SINGULARITY_LLM_API_KEY:-}
+      SINGULARITY_LLM_BASE_URL: ${SINGULARITY_LLM_BASE_URL:-}
+      SINGULARITY_LLM_MODEL: ${SINGULARITY_LLM_MODEL:-}
+      SINGULARITY_EMBEDDINGS_OPENAI_API_KEY: ${SINGULARITY_EMBEDDINGS_OPENAI_API_KEY:-}
+      SINGULARITY_EMBEDDINGS_OPENAI_BASE_URL: ${SINGULARITY_EMBEDDINGS_OPENAI_BASE_URL:-}
+    ports:
+      - "8888:8888"
+    depends_on:
+      - singularity-postgres
+    command: >
+      sh -c "pip install --quiet -e . && singularity-memory serve --host 0.0.0.0 --port 8888"
+
+  # Embedded variant (no external Postgres dependency, uses pg0).
+  # Run: docker compose --profile embedded up singularity-memory-embedded
+  singularity-memory-embedded:
+    profiles: ["embedded"]
+    image: python:3.11-slim
+    working_dir: /app
+    volumes:
+      - .:/app
+      - singularity-pg0:/data
+    environment:
+      SINGULARITY_DATABASE_URL: pg0:///data/singularity-memory
+      SINGULARITY_MCP_ENABLED: "true"
+      SINGULARITY_HOST: "0.0.0.0"
+      SINGULARITY_PORT: "8888"
+      SINGULARITY_LLM_API_KEY: ${SINGULARITY_LLM_API_KEY:-}
+      SINGULARITY_EMBEDDINGS_OPENAI_API_KEY: ${SINGULARITY_EMBEDDINGS_OPENAI_API_KEY:-}
+    ports:
+      - "8888:8888"
+    command: >
+      sh -c "pip install --quiet -e . && singularity-memory serve --host 0.0.0.0 --port 8888"
+
 volumes:
-  hermes-db-data:
+  singularity-db-data:
+  singularity-pg0:

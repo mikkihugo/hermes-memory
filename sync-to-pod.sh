@@ -1,11 +1,12 @@
 #!/bin/bash
 set -e
 REMOTE_HOST="portal-automation"
-LOCAL_DIR="/home/mhugo/code/hermes_memory"
-POD_PATH="/opt/data/plugins/hermes_memory"
+# Sync only the Hermes-plugin subset of the repo into the Hermes plugin path.
+LOCAL_DIR="/home/mhugo/code/singularity_memory/extensions/hermes"
+POD_PATH="/opt/data/plugins/singularity_memory"
 
 echo "Step 1: Rsync to jump host..."
-rsync -avz --delete --exclude '.git' --exclude '__pycache__' "$LOCAL_DIR/" "${REMOTE_HOST}:/tmp/hermes_memory_sync/"
+rsync -avz --delete --exclude '.git' --exclude '__pycache__' "$LOCAL_DIR/" "${REMOTE_HOST}:/tmp/singularity_memory_sync/"
 
 echo "Step 2: Syncing from jump host to Pod..."
 ssh "$REMOTE_HOST" "
@@ -17,6 +18,6 @@ ssh "$REMOTE_HOST" "
   fi
   echo \"Target pod: \$POD_NAME\"
   kubectl exec -n hermes \$POD_NAME -c hermes -- rm -rf $POD_PATH/*
-  kubectl cp /tmp/hermes_memory_sync/. hermes/\$POD_NAME:$POD_PATH/ -c hermes
+  kubectl cp /tmp/singularity_memory_sync/. hermes/\$POD_NAME:$POD_PATH/ -c hermes
 "
 echo "Done."

@@ -1,0 +1,21 @@
+Singularity Memory
+==================
+
+This project is licensed under the MIT License (see LICENSE).
+
+Singularity Memory's server and Python client packages
+(`src/singularity_memory_server/`, `src/singularity_memory_client/`,
+`src/singularity_memory_client_api/`) were originally derived from
+the upstream Hindsight project:
+
+    https://github.com/vectorize-io/hindsight
+
+That project is also licensed under the MIT License. Original
+copyright notices have been preserved in the source files where
+they appeared upstream. The code has been assimilated into the
+Singularity Memory namespace and is now maintained here
+independently of upstream Hindsight.
+
+Issue references in the source code (e.g.
+"vectorize-io/hindsight#977") point to the upstream issue tracker
+where the original engineering rationale lives.
