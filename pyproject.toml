@@ -40,8 +40,8 @@ mcp = ["mcp>=1.0"]
 singularity-memory = "singularity_memory.server_cli:main"
 
 [project.urls]
-Homepage = "https://github.com/mikkihugo/singularity-memory"
-Repository = "https://github.com/mikkihugo/singularity-memory"
+Homepage = "https://github.com/singularity-ng/singularity-memory"
+Repository = "https://github.com/singularity-ng/singularity-memory"
 
 [tool.setuptools.packages.find]
 where = ["src"]
