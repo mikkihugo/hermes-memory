@@ -342,6 +342,12 @@ def _resolve_refresh_tag_filtering(
     return RefreshTagFiltering(tags=model_tags, tags_match=tags_match, tag_groups=None)
 
 
+# TODO(BACKLOG.md #3): add `backfill_embeddings(bank_id, batch_size, max_batches)`
+# method to walk NULL-embedding rows, batch-embed, UPDATE in place. Idempotent.
+# Surface via admin/cli.py.
+# TODO(BACKLOG.md #6): add `record_feedback(memory_item_id, helpful: bool)`
+# alongside an alembic migration that adds helpful_count/unhelpful_count to the
+# items table. Adjust retrieval scoring to use the signal.
 class MemoryEngine(MemoryEngineInterface):
     """
     Advanced memory system using temporal and semantic linking with PostgreSQL.

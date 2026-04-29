@@ -354,6 +354,10 @@ async def _build_and_insert_entity_links_phase3(
         log_buffer.append(f"  Entity links (viz): {len(entity_links)} links in {time.time() - step_start:.3f}s")
 
 
+# TODO(BACKLOG.md #2): when vector_enabled=False (or embeddings_provider="none"),
+# skip the generate_embeddings_batch call and produce facts with embedding=None.
+# Schema is already nullable on the embedding column; downstream paths must
+# tolerate NULL (filter WHERE embedding IS NOT NULL on vector recall).
 async def _extract_and_embed(
     contents: list[RetainContent],
     llm_config,

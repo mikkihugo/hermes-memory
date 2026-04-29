@@ -13,6 +13,10 @@ def reciprocal_rank_fusion(result_lists: list[list[RetrievalResult]], k: int = 6
 
     RRF formula: score(d) = sum_over_lists(1 / (k + rank(d)))
 
+    TODO(BACKLOG.md #4): accept an optional `weights: list[float]` and use
+    `weights[lane] * 1/(k + rank)` so lanes can be biased
+    (lexical_weight / vector_weight / graph_weight).
+
     Args:
         result_lists: List of result lists, each containing RetrievalResult objects
         k: Constant for RRF formula (default: 60)

@@ -1,0 +1,24 @@
+{
+  "name": "@singularity-memory/openclaw-plugin",
+  "version": "0.1.0",
+  "description": "OpenClaw plugin for Singularity Memory - persistent memory via the standalone HTTP+MCP server.",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "openclaw.plugin.json",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.4"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}

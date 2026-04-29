@@ -464,6 +464,9 @@ DEFAULT_LLM_VERTEXAI_SERVICE_ACCOUNT_KEY = None  # Optional, uses ADC if not set
 DEFAULT_LLM_GEMINI_SAFETY_SETTINGS = None  # None = use Gemini default safety settings
 
 DEFAULT_EMBEDDINGS_PROVIDER = "local"
+# TODO(BACKLOG.md #2): add "none" as a supported provider value so users can
+# run lexical-only without a remote embedding endpoint. Implement
+# NoneEmbeddings in engine/embeddings.py and gate retain via vector_enabled.
 DEFAULT_EMBEDDINGS_LOCAL_MODEL = "BAAI/bge-small-en-v1.5"
 DEFAULT_EMBEDDINGS_LOCAL_FORCE_CPU = False  # Force CPU mode for local embeddings (avoids MPS/XPC issues on macOS)
 DEFAULT_EMBEDDINGS_LOCAL_TRUST_REMOTE_CODE = False  # Security: disabled by default, required for some models

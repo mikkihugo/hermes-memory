@@ -1,73 +1,40 @@
 # Singularity Memory
 
-A standalone MCP+HTTP memory server for AI agents — and a Hermes plugin that
-can either embed the server in-process or connect to a running standalone
-instance. Postgres-first, with VectorChord for semantic search, BM25 for
-lexical search, and reciprocal-rank fusion for ranking.
+A standalone memory server for AI agents — Postgres-backed, MCP+HTTP
+native, with BM25 + vector + RRF fusion retrieval and optional reranking.
+The same running server can be shared across **Hermes**, **OpenClaw**,
+**Claude Code** (and any other MCP-aware client) so memories persist and
+move with the user, not the tool.
 
-The same running server can be shared across **Hermes**, **Claude Code**,
-**openclaw**, or any other MCP-aware client.
-
-## Modes of operation
-
-1. **Standalone server** — `singularity-memory serve` (or `docker compose up`)
-   exposes HTTP at `/v1/...` and MCP at `/mcp/`. Multiple clients connect to
-   one running instance.
-2. **Hermes plugin** — drop this repo at
-   `$HERMES_HOME/plugins/singularity_memory/`. Hermes loads it as a
-   `MemoryProvider`. Set `server_url` in `singularity-memory.json` to use a
-   running standalone server, or set `server_embedded: true` to spin up the
-   server inside the Hermes process.
-
-## Standalone server mode
-
-### Install
-
-```bash
-pip install -e .          # from this repo
-# or, when published:
-# pip install singularity-memory
-# uvx singularity-memory serve
+```
+src/
+  singularity_memory/             # CLI shim (singularity-memory serve|mcp|status)
+  singularity_memory_server/      # the engine — HTTP + MCP server, retrieval pipeline
+  singularity_memory_client/      # Python HTTP client (used by extensions)
+  singularity_memory_client_api/  # OpenAPI-generated Python client
+extensions/
+  hermes/                          # Python plugin — Hermes adapter (HTTP client)
+  openclaw/                        # TypeScript plugin — OpenClaw adapter (HTTP client)
+  mcp/                             # Wire-up recipes for Claude Code, Cursor, Windsurf, OpenCode
 ```
 
-### Run
+The server in `src/` is the product. The directories under `extensions/`
+are thin adapters — none of them duplicate retrieval logic; they all
+forward to the running server.
+
+## Quick start
 
 ```bash
-# Embedded Postgres (no external DB), MCP enabled by default:
-singularity-memory serve
+# Bring up the server (Postgres + Singularity Memory):
+docker compose up singularity-postgres singularity-memory
 
-# Use an existing Postgres:
+# Or, against your own Postgres with vchord installed:
 SINGULARITY_DATABASE_URL=postgresql://user:pw@host:5432/db \
 SINGULARITY_LLM_API_KEY=sk-... \
-  singularity-memory serve --host 0.0.0.0 --port 8888
-
-# Status check:
-singularity-memory status
+  pip install -e . && singularity-memory serve --host 0.0.0.0
 ```
 
-### Docker
-
-```bash
-# Default: external Postgres + server (port 8888)
-docker compose up -d singularity-postgres singularity-memory
-
-# Embedded variant (pg0, no external DB):
-docker compose --profile embedded up singularity-memory-embedded
-```
-
-### Wire it up
-
-```bash
-# Claude Code:
-claude mcp add --transport http singularity http://localhost:8888/mcp/
-
-# openclaw or any MCP HTTP client: point it at the same URL.
-
-# Hermes plugin: edit $HERMES_HOME/singularity-memory.json:
-#   { "server_url": "http://localhost:8888" }
-```
-
-### Verify
+Verify both APIs are up:
 
 ```bash
 curl -s http://localhost:8888/v1/banks | jq .
@@ -76,70 +43,98 @@ curl -s -X POST http://localhost:8888/mcp/ \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
-## Hermes plugin mode
+## Wire it up
 
-Hermes discovers memory providers from:
+| Client       | How                                                                          |
+|--------------|------------------------------------------------------------------------------|
+| **Hermes**   | Symlink `extensions/hermes/` into `$HERMES_HOME/plugins/singularity_memory/`. Edit `$HERMES_HOME/singularity-memory.json` to set `server_url`. |
+| **OpenClaw** | `npm install @singularity-memory/openclaw-plugin`, set `serverUrl` in plugin config. See `extensions/openclaw/README.md`. |
+| **Claude Code** | `claude mcp add --transport http singularity http://localhost:8888/mcp/`. See `extensions/mcp/`. |
+| **Cursor / Windsurf / OpenCode** | Drop the appropriate `.mcp.json` snippet from `extensions/mcp/`. |
 
-- `plugins/memory/<name>/` in the Hermes repo
-- `$HERMES_HOME/plugins/<name>/` for user-installed providers
+## What lives where
 
-Place this directory at `$HERMES_HOME/plugins/singularity_memory/`. Hermes
-will load `__init__.py:register()` and instantiate `SingularityMemoryProvider`.
+### `src/singularity_memory_server/` — the engine
 
-Configure via `$HERMES_HOME/singularity-memory.json`:
+Originally derived from [vectorize-io/hindsight](https://github.com/vectorize-io/hindsight)
+(MIT) and assimilated into this codebase under our namespace; see `NOTICE`.
+Provides retain / recall / reflect operations, Banks, entities, mental
+models, audit logs, async workers, alembic migrations, and the FastAPI
+HTTP + MCP server.
 
-```json
-{
-  "dsn": "postgresql://user:pw@host:5432/db",
-  "server_url": "http://localhost:8888",
-  "embedding_api_key": "...",
-  "llm_api_key": "..."
-}
-```
+A ports backlog from the retired in-tree engine lives at
+[`src/singularity_memory_server/BACKLOG.md`](./src/singularity_memory_server/BACKLOG.md):
+six features (`embeddings_pending` metric, `vector_enabled` opt-in,
+auto-backfill, lane weighting, two-tier reranking, helpfulness feedback)
+that landed in the hand-written engine and want a real Postgres+vchord
+test environment to land in B safely.
 
-If `server_url` is unset and `server_embedded` is true, the plugin starts an
-embedded Singularity Memory server (with MCP enabled) inside the Hermes
-process.
+### `extensions/hermes/` — Python plugin
 
-## Backend contract
+Thin Hermes `MemoryProvider` that forwards every call to the running
+server over HTTP. ~330 lines, no in-process retrieval. Implements
+`initialize` / `prefetch` / `sync_turn` / `handle_tool_call` / setup
+wizard config schema.
 
-- PostgreSQL is supported for durable storage (with `pgvector`, `vchord`, and
-  optional `apache-age` extensions); `pg0://` embedded Postgres works for
-  zero-setup local use.
-- Local file storage is supported for development and tests.
-- Dense embeddings come from `https://llm-gateway.centralcloud.com/v1/embeddings`
-  by default (Qwen3 4B embedding model, 2560-dim vectors).
-- Lexical retrieval uses BM25 (VectorChord-BM25).
-- Fused ranking uses reciprocal-rank fusion.
-- Optional reranking can use Qwen3 rerankers on
-  `https://llm-embedding.centralcloud.com/v1`.
+Two operating modes:
+- **External server** (recommended): set `server_url` in
+  `$HERMES_HOME/singularity-memory.json`. Multiple Hermes sessions share
+  one server.
+- **Embedded**: set `server_embedded: true`. Plugin starts the server
+  inside the Hermes process. Useful for laptops / single-user setups.
 
-## Provider surface (Hermes plugin)
+### `extensions/openclaw/` — TypeScript plugin
 
-Implemented `MemoryProvider` methods:
+OpenClaw plugin (`@singularity-memory/openclaw-plugin`) that hooks
+`before_prompt_build` (auto-recall) and `agent_end` (auto-capture) to
+forward to the same HTTP server. Modeled after OpenClaw's in-tree
+`memory-lancedb` plugin, swapping LanceDB for our server.
 
-- `name`, `is_available()`, `initialize()`, `system_prompt_block()`
-- `prefetch()`, `queue_prefetch()`, `sync_turn()`
-- `get_tool_schemas()`, `handle_tool_call()`
-- `shutdown()`, `on_session_end()`, `on_memory_write()`
-- `get_config_schema()`, `save_config()`
+### `extensions/mcp/` — recipes
 
-## Tools
+`.mcp.json` snippets for Claude Code, Cursor, Windsurf, OpenCode. No
+plugin to install on the client side — the server's `/mcp/` endpoint
+speaks JSON-RPC over HTTP and any MCP-aware client connects in one
+config line.
 
-- `singularity_memory_search`
-- `singularity_memory_context`
-- `singularity_memory_store`
-- `singularity_memory_feedback`
-- `singularity_memory_graph` (when AGE is enabled)
-- `singularity_memory_metrics`
-- Bank/admin tools when the embedded server is running:
-  `memory_bank_create`, `memory_bank_delete`, `memory_bank_list`,
-  `memory_bank_config_get`, `memory_bank_config_set`, `memory_stats`,
-  `memory_browse`, `memory_search_debug`, `memory_entities`, `memory_audit`
+## Retrieval stack
+
+- **Vector**: `pgvector` by default (works everywhere). Optional upgrade
+  to `vchord` (Rust-built, better at scale + multilingual). Configure via
+  `SINGULARITY_VECTOR_EXTENSION`.
+- **Lexical**: Postgres native FTS by default (works everywhere).
+  Optional upgrades: `pg_textsearch` (Tantivy-based BM25) or
+  `vchord_bm25` (real BM25 with Block-Max-WAND). Configure via
+  `SINGULARITY_TEXT_SEARCH_EXTENSION`.
+- **Fusion**: Reciprocal Rank Fusion across lanes.
+- **Reranking**: optional cross-encoder via OpenAI-compatible HTTP
+  endpoint (e.g. Qwen3 reranker on a local LLM gateway).
+- **Graph**: Apache AGE (optional).
+
+For typical workloads (tens of thousands of memories per workspace,
+mostly English / code), pgvector + native FTS is genuinely fine.
+vchord-stack matters at scale (>1M items) or for multilingual content.
+
+## Configuration
+
+All server config flows through `SINGULARITY_*` environment variables;
+`singularity_memory_server/singularity_config.py` is the canonical list.
+Common ones:
+
+| Var                                       | Purpose                              |
+|-------------------------------------------|--------------------------------------|
+| `SINGULARITY_DATABASE_URL`                | Postgres DSN                         |
+| `SINGULARITY_HOST` / `SINGULARITY_PORT`   | Bind host / port (default 127.0.0.1:8888) |
+| `SINGULARITY_MCP_ENABLED`                 | Enable `/mcp/` (default true)        |
+| `SINGULARITY_LLM_PROVIDER`                | `openai` / `anthropic` / `none` etc. |
+| `SINGULARITY_LLM_API_KEY`                 | Forwarded to the LLM provider        |
+| `SINGULARITY_EMBEDDINGS_PROVIDER`         | `local` / `openai` / `cohere` etc.   |
+| `SINGULARITY_EMBEDDINGS_OPENAI_API_KEY`   | Embedding endpoint key               |
+| `SINGULARITY_VECTOR_EXTENSION`            | `pgvector` / `vchord`                |
+| `SINGULARITY_TEXT_SEARCH_EXTENSION`       | `native` / `pg_textsearch` / `vchord` |
 
 ## License & attribution
 
-MIT. See `LICENSE`. The server and client packages were originally derived
-from [vectorize-io/hindsight](https://github.com/vectorize-io/hindsight)
-(also MIT) and have since been assimilated into this codebase. See `NOTICE`
-for details.
+MIT. See `LICENSE`. Engine code derived from
+[`vectorize-io/hindsight`](https://github.com/vectorize-io/hindsight) (also
+MIT) and assimilated here; see `NOTICE` for details.

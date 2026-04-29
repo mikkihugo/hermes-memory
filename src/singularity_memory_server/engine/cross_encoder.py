@@ -58,6 +58,10 @@ from ..config import (
 logger = logging.getLogger(__name__)
 
 
+# TODO(BACKLOG.md #5): add a two-tier rerank orchestrator that runs a fast
+# cross-encoder (e.g. Qwen3 0.6B) over ~20 candidates, keeps top-N, then runs
+# a deep cross-encoder (e.g. Qwen3 4B) over the top-N. Config knobs:
+# rerank_fast_model, rerank_deep_model, rerank_deep_top_n.
 class CrossEncoderModel(ABC):
     """
     Abstract base class for cross-encoder reranking.

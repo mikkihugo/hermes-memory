@@ -243,6 +243,9 @@ class NoOpMetricsCollector(MetricsCollectorBase):
         yield
 
 
+# TODO(BACKLOG.md #1): add an observable gauge `singularity_memory.embeddings.pending`
+# whose callback runs `SELECT COUNT(*) FROM <items> WHERE embedding IS NULL`.
+# Sibling of the existing DB-pool gauges around `_setup_db_pool_gauges`.
 class MetricsCollector(MetricsCollectorBase):
     """
     Collector for Singularity Memory metrics.
