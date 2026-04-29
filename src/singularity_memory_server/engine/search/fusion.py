@@ -7,19 +7,24 @@ from typing import Any
 from .types import MergedCandidate, RetrievalResult
 
 
-def reciprocal_rank_fusion(result_lists: list[list[RetrievalResult]], k: int = 60) -> list[MergedCandidate]:
+def reciprocal_rank_fusion(
+    result_lists: list[list[RetrievalResult]],
+    k: int = 60,
+    weights: list[float] | None = None,
+) -> list[MergedCandidate]:
     """
     Merge multiple ranked result lists using Reciprocal Rank Fusion.
 
-    RRF formula: score(d) = sum_over_lists(1 / (k + rank(d)))
-
-    TODO(BACKLOG.md #4): accept an optional `weights: list[float]` and use
-    `weights[lane] * 1/(k + rank)` so lanes can be biased
-    (lexical_weight / vector_weight / graph_weight).
+    RRF formula:
+        unweighted: score(d) = sum_over_lists(1 / (k + rank(d)))
+        weighted:   score(d) = sum_over_lists(weights[i] * 1 / (k + rank(d)))
 
     Args:
         result_lists: List of result lists, each containing RetrievalResult objects
         k: Constant for RRF formula (default: 60)
+        weights: Optional per-lane weight multipliers (parallel to result_lists).
+            When None, every lane contributes equally. When provided, must be
+            the same length as result_lists. Negative weights are clamped to 0.
 
     Returns:
         Merged list of MergedCandidate objects, sorted by RRF score
@@ -29,9 +34,21 @@ def reciprocal_rank_fusion(result_lists: list[list[RetrievalResult]], k: int = 6
         bm25_results = [RetrievalResult(...), RetrievalResult(...), ...]
         graph_results = [RetrievalResult(...), RetrievalResult(...), ...]
 
+        # Equal-weight fusion:
         merged = reciprocal_rank_fusion([semantic_results, bm25_results, graph_results])
-        # Returns: [MergedCandidate(...), MergedCandidate(...), ...]
+        # BM25-biased fusion (e.g. for code search):
+        merged = reciprocal_rank_fusion(
+            [semantic_results, bm25_results, graph_results],
+            weights=[1.0, 1.5, 0.5],
+        )
     """
+    if weights is not None:
+        if len(weights) != len(result_lists):
+            raise ValueError(
+                f"weights length ({len(weights)}) must match result_lists length ({len(result_lists)})"
+            )
+        weights = [max(0.0, float(w)) for w in weights]
+
     # Track scores from each list
     rrf_scores = {}
     source_ranks = {}  # Track rank from each source for each doc_id
@@ -41,6 +58,7 @@ def reciprocal_rank_fusion(result_lists: list[list[RetrievalResult]], k: int = 6
 
     for source_idx, results in enumerate(result_lists):
         source_name = source_names[source_idx] if source_idx < len(source_names) else f"source_{source_idx}"
+        lane_weight = 1.0 if weights is None else weights[source_idx]
 
         for rank, retrieval in enumerate(results, start=1):
             # Type check to catch tuple issues
@@ -65,7 +83,7 @@ def reciprocal_rank_fusion(result_lists: list[list[RetrievalResult]], k: int = 6
                 rrf_scores[doc_id] = 0.0
                 source_ranks[doc_id] = {}
 
-            rrf_scores[doc_id] += 1.0 / (k + rank)
+            rrf_scores[doc_id] += lane_weight * (1.0 / (k + rank))
             source_ranks[doc_id][f"{source_name}_rank"] = rank
 
     # Combine into final results with metadata

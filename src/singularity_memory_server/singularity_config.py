@@ -261,6 +261,17 @@ ENV_RERANKER_GOOGLE_SERVICE_ACCOUNT_KEY = "SINGULARITY_RERANKER_GOOGLE_SERVICE_A
 ENV_VECTOR_EXTENSION = "SINGULARITY_VECTOR_EXTENSION"
 ENV_TEXT_SEARCH_EXTENSION = "SINGULARITY_TEXT_SEARCH_EXTENSION"
 
+ENV_VECTOR_ENABLED = "SINGULARITY_VECTOR_ENABLED"
+ENV_RRF_VECTOR_WEIGHT = "SINGULARITY_RRF_VECTOR_WEIGHT"
+ENV_RRF_LEXICAL_WEIGHT = "SINGULARITY_RRF_LEXICAL_WEIGHT"
+ENV_RRF_GRAPH_WEIGHT = "SINGULARITY_RRF_GRAPH_WEIGHT"
+ENV_RRF_TEMPORAL_WEIGHT = "SINGULARITY_RRF_TEMPORAL_WEIGHT"
+
+ENV_RERANK_FAST_MODEL = "SINGULARITY_RERANK_FAST_MODEL"
+ENV_RERANK_DEEP_MODEL = "SINGULARITY_RERANK_DEEP_MODEL"
+ENV_RERANK_TOP_N = "SINGULARITY_RERANK_TOP_N"
+ENV_RERANK_DEEP_TOP_N = "SINGULARITY_RERANK_DEEP_TOP_N"
+
 ENV_HOST = "SINGULARITY_HOST"
 ENV_PORT = "SINGULARITY_PORT"
 ENV_BASE_PATH = "SINGULARITY_BASE_PATH"
@@ -464,9 +475,8 @@ DEFAULT_LLM_VERTEXAI_SERVICE_ACCOUNT_KEY = None  # Optional, uses ADC if not set
 DEFAULT_LLM_GEMINI_SAFETY_SETTINGS = None  # None = use Gemini default safety settings
 
 DEFAULT_EMBEDDINGS_PROVIDER = "local"
-# TODO(BACKLOG.md #2): add "none" as a supported provider value so users can
-# run lexical-only without a remote embedding endpoint. Implement
-# NoneEmbeddings in engine/embeddings.py and gate retain via vector_enabled.
+# "none" is also accepted (handled by NoneEmbeddings in engine/embeddings.py)
+# for lexical-only deployments — see vector_enabled below.
 DEFAULT_EMBEDDINGS_LOCAL_MODEL = "BAAI/bge-small-en-v1.5"
 DEFAULT_EMBEDDINGS_LOCAL_FORCE_CPU = False  # Force CPU mode for local embeddings (avoids MPS/XPC issues on macOS)
 DEFAULT_EMBEDDINGS_LOCAL_TRUST_REMOTE_CODE = False  # Security: disabled by default, required for some models
@@ -511,6 +521,29 @@ DEFAULT_VECTOR_EXTENSION = "pgvector"  # Options: "pgvector", "vchord", "pgvecto
 
 # Text search extension (native PostgreSQL, vchord BM25, or Timescale pg_textsearch)
 DEFAULT_TEXT_SEARCH_EXTENSION = "native"  # Options: "native", "vchord", "pg_textsearch"
+
+# RRF fusion lane weights. Each lane's contribution to the final score is
+# multiplied by its weight. Default is 1.0 across the board (equivalent to
+# unweighted RRF). Increase a lane's weight to bias toward that retrieval mode
+# (e.g. raise lexical_weight for code search workloads).
+DEFAULT_RRF_VECTOR_WEIGHT = 1.0
+DEFAULT_RRF_LEXICAL_WEIGHT = 1.0
+DEFAULT_RRF_GRAPH_WEIGHT = 1.0
+DEFAULT_RRF_TEMPORAL_WEIGHT = 1.0
+
+# Dense (vector) retrieval lane: explicit opt-out so users without an embedding
+# endpoint can run lexical-only without errors. When False, retain skips
+# embedding generation and recall returns no results from the vector lane.
+DEFAULT_VECTOR_ENABLED = True
+
+# Two-tier reranking: when both rerank_fast_model and rerank_deep_model are
+# configured, fast reranks the full candidate list to top-N (rerank_top_n)
+# and deep reranks only the top-K (rerank_deep_top_n) of those. Empty model
+# strings disable that tier.
+DEFAULT_RERANK_FAST_MODEL = ""
+DEFAULT_RERANK_DEEP_MODEL = ""
+DEFAULT_RERANK_TOP_N = 20
+DEFAULT_RERANK_DEEP_TOP_N = 4
 
 # LiteLLM defaults
 DEFAULT_LITELLM_API_BASE = "http://localhost:4000"
@@ -787,6 +820,21 @@ class SingularityConfig:
     database_schema: str
     vector_extension: str  # "pgvector" or "vchord"
     text_search_extension: str  # "native" or "vchord"
+
+    # Dense lane opt-in (False = lexical-only, no embeddings required)
+    vector_enabled: bool
+
+    # RRF lane weights (multiply each lane's contribution before summing)
+    rrf_vector_weight: float
+    rrf_lexical_weight: float
+    rrf_graph_weight: float
+    rrf_temporal_weight: float
+
+    # Two-tier reranking (empty model strings disable a tier)
+    rerank_fast_model: str
+    rerank_deep_model: str
+    rerank_top_n: int
+    rerank_deep_top_n: int
 
     # LLM (default, used as fallback for per-operation config)
     llm_provider: str
@@ -1267,6 +1315,17 @@ class SingularityConfig:
             database_schema=os.getenv(ENV_DATABASE_SCHEMA, DEFAULT_DATABASE_SCHEMA),
             vector_extension=os.getenv(ENV_VECTOR_EXTENSION, DEFAULT_VECTOR_EXTENSION).lower(),
             text_search_extension=os.getenv(ENV_TEXT_SEARCH_EXTENSION, DEFAULT_TEXT_SEARCH_EXTENSION).lower(),
+            vector_enabled=os.getenv(ENV_VECTOR_ENABLED, str(DEFAULT_VECTOR_ENABLED)).lower() != "false",
+            # RRF lane weights
+            rrf_vector_weight=float(os.getenv(ENV_RRF_VECTOR_WEIGHT, str(DEFAULT_RRF_VECTOR_WEIGHT))),
+            rrf_lexical_weight=float(os.getenv(ENV_RRF_LEXICAL_WEIGHT, str(DEFAULT_RRF_LEXICAL_WEIGHT))),
+            rrf_graph_weight=float(os.getenv(ENV_RRF_GRAPH_WEIGHT, str(DEFAULT_RRF_GRAPH_WEIGHT))),
+            rrf_temporal_weight=float(os.getenv(ENV_RRF_TEMPORAL_WEIGHT, str(DEFAULT_RRF_TEMPORAL_WEIGHT))),
+            # Two-tier reranking
+            rerank_fast_model=os.getenv(ENV_RERANK_FAST_MODEL, DEFAULT_RERANK_FAST_MODEL),
+            rerank_deep_model=os.getenv(ENV_RERANK_DEEP_MODEL, DEFAULT_RERANK_DEEP_MODEL),
+            rerank_top_n=int(os.getenv(ENV_RERANK_TOP_N, str(DEFAULT_RERANK_TOP_N))),
+            rerank_deep_top_n=int(os.getenv(ENV_RERANK_DEEP_TOP_N, str(DEFAULT_RERANK_DEEP_TOP_N))),
             # LLM
             llm_provider=llm_provider,
             llm_api_key=os.getenv(ENV_LLM_API_KEY),

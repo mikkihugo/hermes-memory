@@ -157,6 +157,36 @@ async def _run_restore(db_url: str, input_file: Path, schema: str = "public") ->
     return await _restore(resolved_url, input_file, schema)
 
 
+@app.command(name="backfill-embeddings")
+def backfill_embeddings_cmd(
+    bank_id: str = typer.Option(None, "--bank", help="Bank ID to scope backfill to (default: all banks)"),
+    batch_size: int = typer.Option(32, "--batch-size", "-b", help="Rows to embed per batch"),
+    max_batches: int = typer.Option(None, "--max-batches", help="Stop after this many batches (default: run to completion)"),
+):
+    """Embed every memory_units row that still lacks an embedding.
+
+    Idempotent — safe to run repeatedly or interrupt. No-op when the
+    configured embeddings provider is "none". Useful after flipping
+    SINGULARITY_VECTOR_ENABLED on or after switching embedding models.
+    """
+    import asyncio
+    from ..engine.memory_engine import MemoryEngine
+
+    async def _run() -> int:
+        engine = MemoryEngine(run_migrations=False)
+        try:
+            return await engine.backfill_embeddings(
+                bank_id=bank_id,
+                batch_size=batch_size,
+                max_batches=max_batches,
+            )
+        finally:
+            await engine.close()
+
+    processed = asyncio.run(_run())
+    typer.echo(f"backfill-embeddings: {processed} rows embedded")
+
+
 @app.command()
 def backup(
     output: Path = typer.Argument(..., help="Output file path (.zip)"),

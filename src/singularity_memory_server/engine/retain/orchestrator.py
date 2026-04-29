@@ -354,10 +354,6 @@ async def _build_and_insert_entity_links_phase3(
         log_buffer.append(f"  Entity links (viz): {len(entity_links)} links in {time.time() - step_start:.3f}s")
 
 
-# TODO(BACKLOG.md #2): when vector_enabled=False (or embeddings_provider="none"),
-# skip the generate_embeddings_batch call and produce facts with embedding=None.
-# Schema is already nullable on the embedding column; downstream paths must
-# tolerate NULL (filter WHERE embedding IS NOT NULL on vector recall).
 async def _extract_and_embed(
     contents: list[RetainContent],
     llm_config,
@@ -396,8 +392,21 @@ async def _extract_and_embed(
 
     step_start = time.time()
     augmented_texts = embedding_processing.augment_texts_with_dates(extracted_facts, format_date_fn)
-    embeddings = await embedding_processing.generate_embeddings_batch(embeddings_model, augmented_texts)
-    log_buffer.append(f"  Generate embeddings: {len(embeddings)} embeddings in {time.time() - step_start:.3f}s")
+
+    # Skip embedding generation when the dense lane is disabled (NoneEmbeddings
+    # provider, or vector_enabled=False at config level). Downstream paths must
+    # tolerate `embedding=None`; vector recall already filters
+    # `WHERE embedding IS NOT NULL` so NULL rows are simply invisible to the
+    # vector lane until a future backfill_embeddings run populates them.
+    skip_embeddings = getattr(embeddings_model, "provider_name", None) == "none"
+    if skip_embeddings:
+        embeddings: list[list[float] | None] = [None] * len(augmented_texts)
+        log_buffer.append(
+            f"  Skip embeddings (vector lane disabled): {len(augmented_texts)} facts left unembedded"
+        )
+    else:
+        embeddings = await embedding_processing.generate_embeddings_batch(embeddings_model, augmented_texts)
+        log_buffer.append(f"  Generate embeddings: {len(embeddings)} embeddings in {time.time() - step_start:.3f}s")
 
     processed_facts = [ProcessedFact.from_extracted_fact(ef, emb) for ef, emb in zip(extracted_facts, embeddings)]
 

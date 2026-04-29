@@ -1065,6 +1065,40 @@ class GeminiEmbeddings(Embeddings):
         return all_embeddings
 
 
+class NoneEmbeddings(Embeddings):
+    """
+    No-op embeddings provider for lexical-only deployments.
+
+    Selected when SINGULARITY_EMBEDDINGS_PROVIDER=none or when vector_enabled
+    is False at the engine level. encode() returns empty lists; the retain
+    pipeline interprets that as "leave the embedding column NULL" so a future
+    backfill can populate the vectors when dense lane is later enabled.
+
+    Dimension defaults to 1536 (OpenAI text-embedding-3-small) just so the
+    schema bootstrap has a value; flipping providers later requires a fresh
+    DB or matching dimensions on the new provider.
+    """
+
+    _DEFAULT_DIM = 1536
+
+    def __init__(self, dimension: int = _DEFAULT_DIM):
+        self._dimension = dimension
+
+    @property
+    def provider_name(self) -> str:
+        return "none"
+
+    @property
+    def dimension(self) -> int:
+        return self._dimension
+
+    async def initialize(self) -> None:
+        return None
+
+    def encode(self, texts: list[str]) -> list[list[float]]:
+        return [[] for _ in texts]
+
+
 def create_embeddings_from_env() -> Embeddings:
     """
     Create an Embeddings instance based on configuration.
@@ -1079,6 +1113,8 @@ def create_embeddings_from_env() -> Embeddings:
     config = get_config()
     provider = config.embeddings_provider.lower()
 
+    if provider == "none" or not getattr(config, "vector_enabled", True):
+        return NoneEmbeddings()
     if provider == "tei":
         url = config.embeddings_tei_url
         if not url:

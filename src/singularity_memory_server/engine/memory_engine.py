@@ -342,12 +342,6 @@ def _resolve_refresh_tag_filtering(
     return RefreshTagFiltering(tags=model_tags, tags_match=tags_match, tag_groups=None)
 
 
-# TODO(BACKLOG.md #3): add `backfill_embeddings(bank_id, batch_size, max_batches)`
-# method to walk NULL-embedding rows, batch-embed, UPDATE in place. Idempotent.
-# Surface via admin/cli.py.
-# TODO(BACKLOG.md #6): add `record_feedback(memory_item_id, helpful: bool)`
-# alongside an alembic migration that adds helpful_count/unhelpful_count to the
-# items table. Adjust retrieval scoring to use the signal.
 class MemoryEngine(MemoryEngineInterface):
     """
     Advanced memory system using temporal and semantic linking with PostgreSQL.
@@ -1994,6 +1988,131 @@ class MemoryEngine(MemoryEngineInterface):
         except Exception as e:
             return {"status": "unhealthy", "database": "error", "error": str(e)}
 
+    async def record_feedback(self, memory_item_id: str, helpful: bool) -> dict:
+        """Increment the helpful_count or unhelpful_count for one memory unit.
+
+        Counts are non-negative integers; either is incremented atomically
+        depending on the ``helpful`` flag. Retrieval ranking can then bias
+        toward items where (helpful_count - unhelpful_count) is high without
+        any model retraining.
+
+        Returns the post-increment counts as `{"memory_item_id": str,
+        "helpful_count": int, "unhelpful_count": int}`. Raises if the row
+        doesn't exist.
+        """
+        column = "helpful_count" if helpful else "unhelpful_count"
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"UPDATE memory_units SET {column} = {column} + 1 "
+                f"WHERE id = $1 "
+                f"RETURNING id, helpful_count, unhelpful_count",
+                memory_item_id,
+            )
+        if not row:
+            raise ValueError(f"memory_item_id {memory_item_id!r} not found")
+        return {
+            "memory_item_id": str(row["id"]),
+            "helpful_count": int(row["helpful_count"]),
+            "unhelpful_count": int(row["unhelpful_count"]),
+        }
+
+    async def count_unembedded(self, bank_id: str | None = None) -> int:
+        """Return the number of memory_units rows that still lack an embedding.
+
+        Useful for the `embeddings_pending` observability metric and for
+        deciding whether to kick off a backfill. When `bank_id` is None,
+        counts across all banks.
+        """
+        async with self._pool.acquire() as conn:
+            if bank_id is None:
+                row = await conn.fetchrow(
+                    "SELECT COUNT(*) AS n FROM memory_units WHERE embedding IS NULL"
+                )
+            else:
+                row = await conn.fetchrow(
+                    "SELECT COUNT(*) AS n FROM memory_units WHERE embedding IS NULL AND bank_id = $1",
+                    bank_id,
+                )
+        return int(row["n"]) if row else 0
+
+    async def backfill_embeddings(
+        self,
+        bank_id: str | None = None,
+        batch_size: int = 32,
+        max_batches: int | None = None,
+    ) -> int:
+        """Embed every memory_units row that still lacks an embedding.
+
+        Idempotent: each call processes only `embedding IS NULL` rows, so it's
+        safe to interrupt and resume. Returns the total number of rows
+        embedded across this run.
+
+        No-op when the configured embeddings provider is "none" (i.e. dense
+        lane is disabled). Failures on individual rows are logged and skipped
+        so a single bad item doesn't halt the whole backfill.
+        """
+        provider = getattr(self.embeddings, "provider_name", "")
+        if provider == "none":
+            logger.info("backfill_embeddings: embeddings provider is 'none', nothing to backfill")
+            return 0
+
+        processed = 0
+        batches = 0
+        while True:
+            if max_batches is not None and batches >= max_batches:
+                break
+
+            async with self._pool.acquire() as conn:
+                if bank_id is None:
+                    rows = await conn.fetch(
+                        "SELECT id, fact_text FROM memory_units "
+                        "WHERE embedding IS NULL ORDER BY created_at LIMIT $1",
+                        batch_size,
+                    )
+                else:
+                    rows = await conn.fetch(
+                        "SELECT id, fact_text FROM memory_units "
+                        "WHERE embedding IS NULL AND bank_id = $2 "
+                        "ORDER BY created_at LIMIT $1",
+                        batch_size,
+                        bank_id,
+                    )
+
+            if not rows:
+                break
+
+            texts = [r["fact_text"] for r in rows]
+            try:
+                vectors = self.embeddings.encode(texts)
+            except Exception:
+                logger.exception("backfill_embeddings: batch encode failed; skipping batch")
+                batches += 1
+                continue
+
+            for row, vec in zip(rows, vectors):
+                if not vec:
+                    continue
+                try:
+                    async with self._pool.acquire() as conn:
+                        await conn.execute(
+                            "UPDATE memory_units SET embedding = $1::vector WHERE id = $2",
+                            vec,
+                            row["id"],
+                        )
+                    processed += 1
+                except Exception:
+                    logger.exception("backfill_embeddings: failed to update row %s", row["id"])
+
+            batches += 1
+            if len(rows) < batch_size:
+                break
+
+        logger.info(
+            "backfill_embeddings: done (processed=%d, batches=%d, bank_id=%s)",
+            processed, batches, bank_id,
+        )
+        return processed
+
     async def close(self):
         """Close the connection pool and shutdown background workers."""
         logger.info("close() started")
@@ -3120,13 +3239,26 @@ class MemoryEngine(MemoryEngineInterface):
             fusion_span.set_attribute("singularity_memory.temporal_count", len(temporal_results) if temporal_results else 0)
 
             try:
-                # Merge 3 or 4 result lists depending on temporal constraint
+                # Resolve per-lane RRF weights from runtime config (defaults to 1.0
+                # across the board, equivalent to unweighted RRF).
+                resolved_cfg = getattr(self, "_config", None)
+                w_vec = float(getattr(resolved_cfg, "rrf_vector_weight", 1.0)) if resolved_cfg else 1.0
+                w_lex = float(getattr(resolved_cfg, "rrf_lexical_weight", 1.0)) if resolved_cfg else 1.0
+                w_grf = float(getattr(resolved_cfg, "rrf_graph_weight", 1.0)) if resolved_cfg else 1.0
+                w_tmp = float(getattr(resolved_cfg, "rrf_temporal_weight", 1.0)) if resolved_cfg else 1.0
+
+                # Merge 3 or 4 result lists depending on temporal constraint.
+                # Lane order is fixed: semantic (vector), bm25 (lexical), graph, temporal.
                 if temporal_results:
                     merged_candidates = reciprocal_rank_fusion(
-                        [semantic_results, bm25_results, graph_results, temporal_results]
+                        [semantic_results, bm25_results, graph_results, temporal_results],
+                        weights=[w_vec, w_lex, w_grf, w_tmp],
                     )
                 else:
-                    merged_candidates = reciprocal_rank_fusion([semantic_results, bm25_results, graph_results])
+                    merged_candidates = reciprocal_rank_fusion(
+                        [semantic_results, bm25_results, graph_results],
+                        weights=[w_vec, w_lex, w_grf],
+                    )
 
                 step_duration = time.time() - step_start
                 log_buffer.append(

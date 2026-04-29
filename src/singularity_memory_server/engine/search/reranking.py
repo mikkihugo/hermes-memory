@@ -247,3 +247,57 @@ class CrossEncoderReranker:
         scored_results.sort(key=lambda x: x.weight, reverse=True)
 
         return scored_results
+
+
+async def rerank_two_tier(
+    query: str,
+    candidates: list[MergedCandidate],
+    fast: CrossEncoderReranker,
+    deep: CrossEncoderReranker,
+    *,
+    fast_top_n: int = 20,
+    deep_top_n: int = 4,
+) -> list[ScoredResult]:
+    """Two-tier reranking: fast over many → deep over a few.
+
+    Runs the `fast` cross-encoder over every candidate, keeps the top
+    ``fast_top_n`` by fast score, then runs the (presumably more expensive)
+    `deep` cross-encoder over the top ``deep_top_n`` of those. Final order:
+    deep-ranked head followed by the remainder of the fast-ranked tail.
+
+    Use case: Qwen3 0.6B as `fast` over ~20 candidates, Qwen3 4B as `deep`
+    over the top 4. Better precision than single-tier deep-only at much
+    lower API cost.
+
+    Falls back gracefully: if either tier raises, the result of the other
+    tier is returned. If both raise, the input candidates are returned in
+    their original order with zeroed cross-encoder scores.
+    """
+    if not candidates:
+        return []
+
+    try:
+        fast_scored = await fast.rerank(query, candidates)
+    except Exception:
+        fast_scored = None
+
+    if fast_scored is None:
+        # Fast tier failed; fall through to deep over the original candidates.
+        head = candidates[: max(0, deep_top_n)]
+        tail_unscored: list[ScoredResult] = []
+    else:
+        kept = fast_scored[: max(0, fast_top_n)]
+        head_candidates = [s.candidate for s in kept[: max(0, deep_top_n)]]
+        head = head_candidates
+        tail_unscored = kept[max(0, deep_top_n) :]
+
+    if not head:
+        return list(tail_unscored)
+
+    try:
+        deep_scored = await deep.rerank(query, head)
+    except Exception:
+        # Deep tier failed; return whatever the fast tier produced.
+        return list(fast_scored) if fast_scored is not None else []
+
+    return [*deep_scored, *tail_unscored]
