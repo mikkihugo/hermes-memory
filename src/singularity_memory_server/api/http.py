@@ -3045,6 +3045,99 @@ def _register_routes(app: FastAPI):
             logger.error(f"Error in /v1/default/banks/{bank_id}/memories/{memory_id}/history: {error_detail}")
             raise HTTPException(status_code=500, detail=str(e))
 
+    # ── Helpfulness feedback ──────────────────────────────────────────────
+    # Per-item helpful/unhelpful counts. Stored in memory_units columns added by
+    # alembic revision b2c3d4e5f6a7. Retrieval ranking optionally biases
+    # candidates by (helpful_count - unhelpful_count).
+
+    from pydantic import BaseModel as _FeedbackBaseModel
+
+    class _FeedbackRequest(_FeedbackBaseModel):  # type: ignore[misc]
+        helpful: bool
+
+    @app.post(
+        "/v1/default/banks/{bank_id}/memories/{memory_id}/feedback",
+        summary="Record helpfulness feedback",
+        description=(
+            "Increment helpful_count or unhelpful_count on one memory_units row. "
+            "Counts are non-negative integers; retrieval ranking can use the signal "
+            "to bias future recall toward items that have demonstrated usefulness."
+        ),
+        operation_id="record_memory_feedback",
+        tags=["Memory"],
+    )
+    async def api_record_feedback(
+        bank_id: str,
+        memory_id: str,
+        request: _FeedbackRequest,
+        request_context: RequestContext = Depends(get_request_context),
+    ):
+        try:
+            return await memory.record_feedback(memory_item_id=memory_id, helpful=request.helpful)
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        except (AuthenticationError, HTTPException):
+            raise
+        except Exception as e:
+            logger.error(f"Error in /v1/default/banks/{bank_id}/memories/{memory_id}/feedback: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    # ── Backfill embeddings ───────────────────────────────────────────────
+    # Triggered manually after toggling vector_enabled on or after switching
+    # embedding models. Idempotent (only acts on rows where embedding IS NULL).
+
+    class _BackfillRequest(_FeedbackBaseModel):  # type: ignore[misc]
+        batch_size: int = 32
+        max_batches: int | None = None
+
+    @app.post(
+        "/v1/default/banks/{bank_id}/admin/backfill-embeddings",
+        summary="Backfill missing embeddings",
+        description=(
+            "Embed every memory_units row in the bank that still has a NULL embedding. "
+            "Idempotent and safe to interrupt. No-op when embeddings provider is 'none'."
+        ),
+        operation_id="backfill_embeddings",
+        tags=["Memory"],
+    )
+    async def api_backfill_embeddings(
+        bank_id: str,
+        request: _BackfillRequest,
+        request_context: RequestContext = Depends(get_request_context),
+    ):
+        try:
+            processed = await memory.backfill_embeddings(
+                bank_id=bank_id,
+                batch_size=request.batch_size,
+                max_batches=request.max_batches,
+            )
+            return {"bank_id": bank_id, "processed": processed}
+        except (AuthenticationError, HTTPException):
+            raise
+        except Exception as e:
+            logger.error(f"Error in /v1/default/banks/{bank_id}/admin/backfill-embeddings: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.get(
+        "/v1/default/banks/{bank_id}/admin/embeddings-pending",
+        summary="Count rows pending embedding backfill",
+        description="Return the number of memory_units rows in this bank whose embedding column is NULL.",
+        operation_id="count_unembedded",
+        tags=["Memory"],
+    )
+    async def api_count_unembedded(
+        bank_id: str,
+        request_context: RequestContext = Depends(get_request_context),
+    ):
+        try:
+            pending = await memory.count_unembedded(bank_id=bank_id)
+            return {"bank_id": bank_id, "embeddings_pending": pending}
+        except (AuthenticationError, HTTPException):
+            raise
+        except Exception as e:
+            logger.error(f"Error in /v1/default/banks/{bank_id}/admin/embeddings-pending: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
     @app.post(
         "/v1/default/banks/{bank_id}/memories/recall",
         response_model=RecallResponse,

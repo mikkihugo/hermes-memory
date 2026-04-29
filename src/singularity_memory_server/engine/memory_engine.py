@@ -3300,8 +3300,52 @@ class MemoryEngine(MemoryEngineInterface):
                     pre_filtered_count = len(merged_candidates) - reranker_max_candidates
                     merged_candidates = merged_candidates[:reranker_max_candidates]
 
-                # Rerank using cross-encoder
-                scored_results = await reranker_instance.rerank(query, merged_candidates)
+                # Rerank using cross-encoder. When both rerank_fast_model and
+                # rerank_deep_model are configured, run a two-tier pass: fast over
+                # all candidates, then deep over the top deep_top_n. Falls back
+                # to single-tier if either model is empty or the deep tier
+                # construction fails.
+                cfg = get_config()
+                fast_model = (cfg.rerank_fast_model or "").strip()
+                deep_model = (cfg.rerank_deep_model or "").strip()
+                two_tier_ready = bool(fast_model and deep_model and fast_model != deep_model)
+                scored_results = None
+                if two_tier_ready:
+                    try:
+                        from .cross_encoder import create_cross_encoder_from_env
+                        from .search.reranking import rerank_two_tier
+
+                        # Construct the deep cross-encoder from env, overriding
+                        # only the model name. Fast tier reuses the existing
+                        # reranker_instance (which is built from the default
+                        # rerank model).
+                        import os as _os
+                        prev_model = _os.environ.get("SINGULARITY_RERANK_LOCAL_MODEL")
+                        _os.environ["SINGULARITY_RERANK_LOCAL_MODEL"] = deep_model
+                        try:
+                            deep_ce = create_cross_encoder_from_env()
+                        finally:
+                            if prev_model is None:
+                                _os.environ.pop("SINGULARITY_RERANK_LOCAL_MODEL", None)
+                            else:
+                                _os.environ["SINGULARITY_RERANK_LOCAL_MODEL"] = prev_model
+                        deep_reranker = CrossEncoderReranker(cross_encoder=deep_ce)
+                        await deep_reranker.ensure_initialized()
+                        await reranker_instance.ensure_initialized()
+                        scored_results = await rerank_two_tier(
+                            query,
+                            merged_candidates,
+                            fast=reranker_instance,
+                            deep=deep_reranker,
+                            fast_top_n=cfg.rerank_top_n,
+                            deep_top_n=cfg.rerank_deep_top_n,
+                        )
+                    except Exception:
+                        logger.warning("two-tier rerank failed; falling back to single-tier", exc_info=True)
+                        scored_results = None
+
+                if scored_results is None:
+                    scored_results = await reranker_instance.rerank(query, merged_candidates)
 
                 step_duration = time.time() - step_start
                 pre_filter_note = f" (pre-filtered {pre_filtered_count})" if pre_filtered_count > 0 else ""

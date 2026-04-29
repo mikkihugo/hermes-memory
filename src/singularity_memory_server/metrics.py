@@ -243,9 +243,14 @@ class NoOpMetricsCollector(MetricsCollectorBase):
         yield
 
 
-# TODO(BACKLOG.md #1): wire MemoryEngine.count_unembedded() into an observable
-# gauge `singularity_memory.embeddings.pending`. Method exists; needs DB pool
-# plumbing into the collector (sibling of existing DB-pool gauges).
+# Note: `embeddings_pending` is intentionally NOT exposed as an OTel observable
+# gauge here. OTel observable gauge callbacks are sync, but the underlying
+# count requires an async DB query; bridging that with run_coroutine_threadsafe
+# would add a fragile background loop for a once-per-scrape value. The same
+# count is exposed via `GET /v1/default/banks/{bank_id}/admin/embeddings-pending`
+# (see api/http.py) and via the `singularity-memory-server admin
+# backfill-embeddings` CLI; Prometheus operators who want it can scrape the
+# HTTP endpoint with blackbox_exporter.
 class MetricsCollector(MetricsCollectorBase):
     """
     Collector for Singularity Memory metrics.

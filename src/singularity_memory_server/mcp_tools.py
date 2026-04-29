@@ -209,6 +209,7 @@ def register_mcp_tools(
         "retain",
         "sync_retain",
         "recall",
+        "feedback",
         "reflect",
         "list_banks",
         "create_bank",
@@ -246,6 +247,9 @@ def register_mcp_tools(
 
     if "recall" in tools_to_register:
         _register_recall(mcp, memory, config)
+
+    if "feedback" in tools_to_register:
+        _register_feedback(mcp, memory, config)
 
     if "reflect" in tools_to_register:
         _register_reflect(mcp, memory, config)
@@ -884,6 +888,56 @@ def _register_recall(mcp: FastMCP, memory: MemoryEngine, config: MCPToolsConfig)
             except Exception as e:
                 logger.error(f"Error searching: {e}", exc_info=True)
                 return {"error": str(e), "results": []}
+
+
+def _register_feedback(mcp: FastMCP, memory: MemoryEngine, config: MCPToolsConfig) -> None:
+    """Register the helpfulness-feedback tool.
+
+    Lets agents (or downstream consumers) record per-memory thumbs-up /
+    thumbs-down signals. Counts are stored on memory_units (see alembic
+    revision b2c3d4e5f6a7) and biased into retrieval ranking via
+    `apply_combined_scoring` (tanh-squashed, ±5% bound).
+    """
+
+    if config.include_bank_id_param:
+
+        @mcp.tool()
+        async def memory_feedback(memory_item_id: str, helpful: bool, bank_id: str) -> dict:
+            """Record helpfulness feedback for one memory.
+
+            Args:
+                memory_item_id: Memory unit ID (UUID).
+                helpful: True for thumbs-up, False for thumbs-down.
+                bank_id: Bank scope.
+
+            Returns: post-increment counts for the row, or an error dict.
+            """
+            try:
+                return await memory.record_feedback(memory_item_id=memory_item_id, helpful=bool(helpful))
+            except ValueError as e:
+                return {"error": str(e)}
+            except Exception as e:
+                logger.error(f"memory_feedback failed: {e}", exc_info=True)
+                return {"error": str(e)}
+    else:
+
+        @mcp.tool()
+        async def memory_feedback(memory_item_id: str, helpful: bool) -> dict:
+            """Record helpfulness feedback for one memory.
+
+            Args:
+                memory_item_id: Memory unit ID (UUID).
+                helpful: True for thumbs-up, False for thumbs-down.
+
+            Returns: post-increment counts for the row, or an error dict.
+            """
+            try:
+                return await memory.record_feedback(memory_item_id=memory_item_id, helpful=bool(helpful))
+            except ValueError as e:
+                return {"error": str(e)}
+            except Exception as e:
+                logger.error(f"memory_feedback failed: {e}", exc_info=True)
+                return {"error": str(e)}
 
 
 def _register_reflect(mcp: FastMCP, memory: MemoryEngine, config: MCPToolsConfig) -> None:

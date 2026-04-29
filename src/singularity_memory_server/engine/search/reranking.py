@@ -126,7 +126,24 @@ def apply_combined_scoring(
         recency_boost = 1.0 + recency_alpha * (sr.recency - 0.5)
         temporal_boost = 1.0 + temporal_alpha * (sr.temporal - 0.5)
         proof_count_boost = 1.0 + proof_count_alpha * (proof_norm - 0.5)
-        sr.combined_score = sr.cross_encoder_score_normalized * recency_boost * temporal_boost * proof_count_boost
+
+        # Helpfulness-feedback boost. helpful_count and unhelpful_count are
+        # populated by record_feedback (alembic b2c3d4e5f6a7); items with no
+        # feedback yet have both at 0 and the boost is 1.0 (neutral). The
+        # delta is squashed via tanh so a few thumbs-up/down don't dominate
+        # the cross-encoder score; bounds are roughly [0.95, 1.05].
+        helpful = getattr(sr.retrieval, "helpful_count", 0) or 0
+        unhelpful = getattr(sr.retrieval, "unhelpful_count", 0) or 0
+        feedback_delta = helpful - unhelpful
+        feedback_boost = 1.0 + 0.05 * math.tanh(feedback_delta / 5.0)
+
+        sr.combined_score = (
+            sr.cross_encoder_score_normalized
+            * recency_boost
+            * temporal_boost
+            * proof_count_boost
+            * feedback_boost
+        )
         sr.weight = sr.combined_score
 
 
