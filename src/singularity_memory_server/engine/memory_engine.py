@@ -1940,6 +1940,21 @@ class MemoryEngine(MemoryEngineInterface):
         # Start audit log retention sweep (if configured)
         self._audit_logger.start_retention_sweep()
 
+        # Start background workers (auto-backfill, auto-consolidation,
+        # cached unembedded-count refresh). Each is opt-in via SingularityConfig
+        # and silently no-ops when disabled.
+        try:
+            from .background_workers import BackgroundWorkers
+            self._background_workers = BackgroundWorkers()
+            self._background_workers.start(self)
+            # Expose embeddings_pending gauge (reads cached count on scrape).
+            try:
+                get_metrics_collector().set_memory_engine(self)
+            except Exception:
+                logger.exception("metrics: set_memory_engine failed")
+        except Exception:
+            logger.exception("background_workers: failed to start; continuing without them")
+
         self._initialized = True
         logger.info("Memory system initialized (pool and task backend started)")
 
@@ -2157,15 +2172,12 @@ class MemoryEngine(MemoryEngineInterface):
         memory ("pressure pager" for context-window relief, modeled on
         MemGPT's working-memory loop).
 
-        Concatenates the messages, truncates to roughly `target_chars`, retains
-        as a memory_unit via the standard retain pipeline, and returns the new
-        memory_item_id and a short preview the caller can use to replace the
-        offloaded turns in its prompt.
-
-        Note: this is a deliberate "good enough" implementation that doesn't
-        yet call the LLM to summarize — that's a follow-up. The current
-        version uses simple structural compression (drop tool-call payloads,
-        keep first/last sentences) to free context without an LLM round-trip.
+        Concatenates the messages, summarizes via the configured LLM (falling
+        back to structural head+tail compression when no LLM is available or
+        the call fails), retains the result as a memory_unit via the standard
+        retain pipeline, and returns the new memory_item_id and a short
+        preview the caller can use to replace the offloaded turns in its
+        prompt.
         """
         text_pieces: list[str] = []
         for msg in messages or []:
@@ -2184,7 +2196,55 @@ class MemoryEngine(MemoryEngineInterface):
             text_pieces.append(f"{role}: {content}")
 
         joined = "\n".join(text_pieces)
-        if len(joined) > target_chars:
+
+        # Prefer LLM summarization when an LLM provider is configured; fall
+        # back to head+tail truncation on any failure (no LLM, network
+        # error, model refused, etc.) so the pressure-pager always returns
+        # something useful.
+        summary_text: str | None = None
+        try:
+            llm_cfg = getattr(self, "_consolidation_llm_config", None) or getattr(self, "_llm_config", None)
+            llm_provider = getattr(llm_cfg, "provider", "") if llm_cfg else ""
+            if llm_cfg and llm_provider and llm_provider != "none":
+                prompt_messages = [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are compressing a window of conversation into a single "
+                            "concise summary memory. Preserve concrete facts, decisions, "
+                            "user preferences, and explicit goals. Drop pleasantries, "
+                            "filler, and tool-call payloads. Aim for ~"
+                            f"{max(200, target_chars // 4)} characters."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Summarize the following conversation window:\n\n{joined}",
+                    },
+                ]
+                response = await llm_cfg.call(
+                    messages=prompt_messages,
+                    max_completion_tokens=max(200, target_chars // 2),
+                    temperature=0.2,
+                    scope="pressure-pager",
+                )
+                # Extract text content from a typed response or a string
+                if isinstance(response, str):
+                    summary_text = response
+                elif hasattr(response, "content"):
+                    summary_text = str(response.content)
+                elif isinstance(response, dict):
+                    summary_text = response.get("content") or response.get("text") or ""
+                if summary_text:
+                    summary_text = summary_text.strip()
+        except Exception as e:
+            logger.warning("summarize_and_offload: LLM summarization failed; falling back to structural compression: %s", e)
+            summary_text = None
+
+        if summary_text:
+            joined = summary_text[:target_chars]
+        elif len(joined) > target_chars:
+            # Structural fallback: head + tail with explicit truncation marker.
             half = target_chars // 2
             joined = joined[:half] + "\n…[truncated]…\n" + joined[-half:]
 
@@ -2357,6 +2417,14 @@ class MemoryEngine(MemoryEngineInterface):
     async def close(self):
         """Close the connection pool and shutdown background workers."""
         logger.info("close() started")
+
+        # Stop the auto-backfill / auto-consolidation / pending-count workers
+        bg = getattr(self, "_background_workers", None)
+        if bg is not None:
+            try:
+                await bg.stop()
+            except Exception:
+                logger.exception("background_workers: shutdown raised; continuing")
 
         # Stop audit log retention sweep
         await self._audit_logger.stop_retention_sweep()

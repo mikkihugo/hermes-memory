@@ -208,6 +208,10 @@ class MetricsCollectorBase:
         """Set the database pool for metrics collection."""
         pass
 
+    def set_memory_engine(self, engine: Any) -> None:
+        """Bind the MemoryEngine for cross-engine gauges (e.g. embeddings_pending)."""
+        pass
+
 
 class NoOpMetricsCollector(MetricsCollectorBase):
     """No-op metrics collector that does nothing. Used when metrics are disabled."""
@@ -615,6 +619,35 @@ class MetricsCollector(MetricsCollectorBase):
             callbacks=[get_pool_max_size],
             description="Maximum pool size",
             unit="{connections}",
+        )
+
+    def set_memory_engine(self, engine: Any) -> None:
+        """Bind a MemoryEngine to expose embedding-pipeline gauges.
+
+        Reads `engine._background_workers.cached_unembedded_count` (a value
+        refreshed by the engine's pending-count loop, see
+        engine/background_workers.py). Avoids the sync-callback-vs-async-DB
+        problem by always reading a cached value rather than running a SQL
+        query inside the OTel scrape thread.
+        """
+        self._memory_engine = engine
+        if engine is None:
+            return
+
+        def get_embeddings_pending(_options):
+            try:
+                bg = getattr(engine, "_background_workers", None)
+                if bg is None:
+                    return
+                yield metrics.Observation(int(bg.cached_unembedded_count))
+            except Exception:
+                pass
+
+        self.meter.create_observable_gauge(
+            name="singularity_memory.embeddings.pending",
+            callbacks=[get_embeddings_pending],
+            description="Number of memory_units rows whose embedding column is NULL (pending backfill)",
+            unit="{rows}",
         )
 
 

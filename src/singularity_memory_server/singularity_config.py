@@ -272,6 +272,12 @@ ENV_RERANK_DEEP_MODEL = "SINGULARITY_RERANK_DEEP_MODEL"
 ENV_RERANK_TOP_N = "SINGULARITY_RERANK_TOP_N"
 ENV_RERANK_DEEP_TOP_N = "SINGULARITY_RERANK_DEEP_TOP_N"
 
+ENV_AUTO_BACKFILL_ENABLED = "SINGULARITY_AUTO_BACKFILL_ENABLED"
+ENV_AUTO_BACKFILL_INTERVAL_SECONDS = "SINGULARITY_AUTO_BACKFILL_INTERVAL_SECONDS"
+ENV_AUTO_CONSOLIDATION_ENABLED = "SINGULARITY_AUTO_CONSOLIDATION_ENABLED"
+ENV_AUTO_CONSOLIDATION_INTERVAL_SECONDS = "SINGULARITY_AUTO_CONSOLIDATION_INTERVAL_SECONDS"
+ENV_EMBEDDINGS_PENDING_REFRESH_SECONDS = "SINGULARITY_EMBEDDINGS_PENDING_REFRESH_SECONDS"
+
 ENV_HOST = "SINGULARITY_HOST"
 ENV_PORT = "SINGULARITY_PORT"
 ENV_BASE_PATH = "SINGULARITY_BASE_PATH"
@@ -544,6 +550,15 @@ DEFAULT_RERANK_FAST_MODEL = ""
 DEFAULT_RERANK_DEEP_MODEL = ""
 DEFAULT_RERANK_TOP_N = 20
 DEFAULT_RERANK_DEEP_TOP_N = 4
+
+# Background workers (auto-backfill, auto-consolidation, pending-count refresh).
+# All opt-in: defaults are False / large intervals so existing deployments don't
+# silently start running new background work.
+DEFAULT_AUTO_BACKFILL_ENABLED = False
+DEFAULT_AUTO_BACKFILL_INTERVAL_SECONDS = 300  # 5 min between backfill passes
+DEFAULT_AUTO_CONSOLIDATION_ENABLED = False
+DEFAULT_AUTO_CONSOLIDATION_INTERVAL_SECONDS = 3600  # 1 hour between sleeptime runs
+DEFAULT_EMBEDDINGS_PENDING_REFRESH_SECONDS = 60  # how often the cached count is refreshed
 
 # LiteLLM defaults
 DEFAULT_LITELLM_API_BASE = "http://localhost:4000"
@@ -835,6 +850,13 @@ class SingularityConfig:
     rerank_deep_model: str
     rerank_top_n: int
     rerank_deep_top_n: int
+
+    # Background workers
+    auto_backfill_enabled: bool
+    auto_backfill_interval_seconds: int
+    auto_consolidation_enabled: bool
+    auto_consolidation_interval_seconds: int
+    embeddings_pending_refresh_seconds: int
 
     # LLM (default, used as fallback for per-operation config)
     llm_provider: str
@@ -1326,6 +1348,12 @@ class SingularityConfig:
             rerank_deep_model=os.getenv(ENV_RERANK_DEEP_MODEL, DEFAULT_RERANK_DEEP_MODEL),
             rerank_top_n=int(os.getenv(ENV_RERANK_TOP_N, str(DEFAULT_RERANK_TOP_N))),
             rerank_deep_top_n=int(os.getenv(ENV_RERANK_DEEP_TOP_N, str(DEFAULT_RERANK_DEEP_TOP_N))),
+            # Background workers
+            auto_backfill_enabled=os.getenv(ENV_AUTO_BACKFILL_ENABLED, str(DEFAULT_AUTO_BACKFILL_ENABLED)).lower() == "true",
+            auto_backfill_interval_seconds=int(os.getenv(ENV_AUTO_BACKFILL_INTERVAL_SECONDS, str(DEFAULT_AUTO_BACKFILL_INTERVAL_SECONDS))),
+            auto_consolidation_enabled=os.getenv(ENV_AUTO_CONSOLIDATION_ENABLED, str(DEFAULT_AUTO_CONSOLIDATION_ENABLED)).lower() == "true",
+            auto_consolidation_interval_seconds=int(os.getenv(ENV_AUTO_CONSOLIDATION_INTERVAL_SECONDS, str(DEFAULT_AUTO_CONSOLIDATION_INTERVAL_SECONDS))),
+            embeddings_pending_refresh_seconds=int(os.getenv(ENV_EMBEDDINGS_PENDING_REFRESH_SECONDS, str(DEFAULT_EMBEDDINGS_PENDING_REFRESH_SECONDS))),
             # LLM
             llm_provider=llm_provider,
             llm_api_key=os.getenv(ENV_LLM_API_KEY),

@@ -162,16 +162,60 @@ consolidation reactively).
 
 ---
 
-## Open follow-ups (deferred, not blocking)
+## Background workers (also landed)
 
-- **Auto-backfill on toggle** — kick off `backfill_embeddings` in a
-  background task at server startup when `vector_enabled=True` and
-  `count_unembedded > 0`, with throttling. Defer until a real
-  deployment hits the "I just flipped dense on, where's my recall?"
-  case.
-- **Prometheus gauge** for `embeddings_pending` — see #1 above.
-  `blackbox_exporter` scraping the HTTP endpoint is the recommended
-  workaround.
+A single `engine/background_workers.py` module owns three opt-in
+coroutine tasks, started by `MemoryEngine.initialize()` and stopped
+cleanly by `MemoryEngine.close()`.
+
+### #10 Auto-backfill loop
+
+- `BackgroundWorkers._auto_backfill_loop`: when `auto_backfill_enabled=True`,
+  checks the cached unembedded-row count every
+  `auto_backfill_interval_seconds` (default 300) and calls
+  `backfill_embeddings` whenever pending > 0. Idempotent.
+- Eliminates the manual `admin backfill-embeddings` step after flipping
+  `vector_enabled=True` on an existing corpus.
+
+### #11 Auto-consolidation loop
+
+- `BackgroundWorkers._auto_consolidation_loop`: when
+  `auto_consolidation_enabled=True`, iterates known banks every
+  `auto_consolidation_interval_seconds` (default 3600) and runs
+  `run_consolidation_job` on each. Banks with `enable_observations=False`
+  short-circuit inside the consolidator, so this is safe to leave on.
+- Replaces the need for external cron / k8s CronJob calling the
+  `admin consolidate` command.
+
+### #12 Cached unembedded count + OTel gauge
+
+- `BackgroundWorkers._pending_count_loop`: refreshes
+  `cached_unembedded_count` every `embeddings_pending_refresh_seconds`
+  (default 60) via a single `count_unembedded` call.
+- `MetricsCollector.set_memory_engine(engine)` registers an observable
+  gauge `singularity_memory.embeddings.pending` whose callback yields
+  the cached value (no async-from-sync hack required).
+- Wired automatically at engine startup; replaces the
+  "scrape the HTTP endpoint with blackbox_exporter" workaround.
+
+### LLM-driven summarization for pressure pager
+
+- `summarize_and_offload` now calls the configured LLM
+  (`_consolidation_llm_config` → `_llm_config` fallback) with a
+  pressure-pager system prompt. Falls back to structural head+tail
+  truncation when the LLM provider is `none` or the call fails.
+- No new config — reuses existing LLM credentials.
+
+---
+
+## Remaining follow-ups
+
 - **Feedback signal tuning** — the `tanh / 5` saturation and `±5%`
-  bound are conservative defaults. Once real-world feedback data is
-  available, sweep these against held-out recall benchmarks.
+  bound in apply_combined_scoring are conservative defaults. Once
+  real-world feedback data is available, sweep these against held-out
+  recall benchmarks.
+- **Validate against real Postgres + vchord** — none of the engine
+  ports have been run against a live database in development. Code
+  compiles, signatures align, but the alembic migrations + retain/recall
+  integration paths need a smoke test before we make confident
+  retrieval-quality claims.
