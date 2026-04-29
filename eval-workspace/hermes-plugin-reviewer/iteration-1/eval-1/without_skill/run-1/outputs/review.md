@@ -35,7 +35,7 @@ Simply saving every turn is "dumb" storage. Smart storage includes:
 To be fully integrated into Hermes, the provider needs:
 *   **Tool Schemas:** Defining `get_tool_schemas` so the model can explicitly call `search`, `store`, or `feedback` tools.
 *   **System Prompt Blocks:** Providing instructions to the LLM on how and when to use this specific memory provider.
-*   **Feedback Mechanism:** Handling `hermes_memory_feedback` tool calls to learn which memories are actually helpful to the user, allowing for future ranking adjustments.
+*   **Feedback Mechanism:** Handling `singularity_memory_feedback` tool calls to learn which memories are actually helpful to the user, allowing for future ranking adjustments.
 
 ### 6. Observability
 *   **Metrics Collection:** Tracking retrieval latency, cache hits/misses, and success rates for different retrieval operations.

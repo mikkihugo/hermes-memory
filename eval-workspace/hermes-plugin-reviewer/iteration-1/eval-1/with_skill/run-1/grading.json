@@ -1,9 +1,9 @@
 {
   "expectations": [
     {
-      "text": "Output contains '# Hermes Plugin Review:'",
+      "text": "Output contains '# Singularity Memory Review:'",
       "passed": true,
-      "evidence": "# Hermes Plugin Review: BasicProvider"
+      "evidence": "# Singularity Memory Review: BasicProvider"
     },
     {
       "text": "Identifies missing Hybrid/Vector search",

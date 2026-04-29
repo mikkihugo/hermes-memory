@@ -1,4 +1,4 @@
-# Hermes Plugin Review: BasicProvider
+# Singularity Memory Review: BasicProvider
 
 ## Executive Summary
 **Grade: 2/10 (Critical Missing Logic)**

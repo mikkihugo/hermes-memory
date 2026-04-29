@@ -1,9 +1,9 @@
 {
   "expectations": [
     {
-      "text": "structured_report: Output contains '# Hermes Plugin Review:'",
+      "text": "structured_report: Output contains '# Singularity Memory Review:'",
       "passed": false,
-      "evidence": "The report starts with '# Review Report: Hermes Memory Plugin (`hermes_memory`)' instead of '# Hermes Plugin Review:'."
+      "evidence": "The report starts with '# Review Report: Singularity Memory (`singularity_memory`)' instead of '# Singularity Memory Review:'."
     },
     {
       "text": "rrf_mention: Mentions 'RRF' or 'Reciprocal Rank Fusion'",

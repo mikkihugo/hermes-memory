@@ -1,7 +1,7 @@
-# Hermes Plugin Review: hermes_memory
+# Singularity Memory Review: singularity_memory
 
 ## Executive Summary
-The `hermes_memory` plugin is a sophisticated memory provider implementation that demonstrates high "Retrieval Intelligence" and is largely production-ready for the Hermes ecosystem. It leverages a hybrid retrieval stack (Vector, Lexical, and Graph) with weighted Reciprocal Rank Fusion (RRF) and multi-stage reranking. The implementation is resilient, featuring "Sparse Refill" logic to handle embedding service outages and a local JSON fallback for development. The primary areas for improvement are the addition of temporal biasing in ranking and enhancing the "smartness" of automated session-end summaries.
+The `singularity_memory` plugin is a sophisticated memory provider implementation that demonstrates high "Retrieval Intelligence" and is largely production-ready for the Hermes ecosystem. It leverages a hybrid retrieval stack (Vector, Lexical, and Graph) with weighted Reciprocal Rank Fusion (RRF) and multi-stage reranking. The implementation is resilient, featuring "Sparse Refill" logic to handle embedding service outages and a local JSON fallback for development. The primary areas for improvement are the addition of temporal biasing in ranking and enhancing the "smartness" of automated session-end summaries.
 
 ## Detailed Audit
 

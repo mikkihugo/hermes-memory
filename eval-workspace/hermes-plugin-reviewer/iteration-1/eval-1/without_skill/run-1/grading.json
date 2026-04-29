@@ -1,9 +1,9 @@
 {
   "expectations": [
     {
-      "text": "structured_report: Output contains '# Hermes Plugin Review:'",
+      "text": "structured_report: Output contains '# Singularity Memory Review:'",
       "passed": false,
-      "evidence": "The report header is '# Review: Hermes BasicProvider Scaffold', which does not match the required '# Hermes Plugin Review:'."
+      "evidence": "The report header is '# Review: Hermes BasicProvider Scaffold', which does not match the required '# Singularity Memory Review:'."
     },
     {
       "text": "missing_hybrid_mention: Identifies missing Hybrid/Vector search",

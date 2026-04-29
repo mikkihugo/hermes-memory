@@ -28,9 +28,9 @@
       },
       "expectations": [
         {
-          "text": "Output contains '# Hermes Plugin Review:'",
+          "text": "Output contains '# Singularity Memory Review:'",
           "passed": true,
-          "evidence": "# Hermes Plugin Review: hermes_memory"
+          "evidence": "# Singularity Memory Review: singularity_memory"
         },
         {
           "text": "Mentions 'RRF' or 'Reciprocal Rank Fusion'",
@@ -71,9 +71,9 @@
       },
       "expectations": [
         {
-          "text": "Output contains '# Hermes Plugin Review:'",
+          "text": "Output contains '# Singularity Memory Review:'",
           "passed": true,
-          "evidence": "# Hermes Plugin Review: BasicProvider"
+          "evidence": "# Singularity Memory Review: BasicProvider"
         },
         {
           "text": "Identifies missing Hybrid/Vector search",
@@ -114,9 +114,9 @@
       },
       "expectations": [
         {
-          "text": "structured_report: Output contains '# Hermes Plugin Review:'",
+          "text": "structured_report: Output contains '# Singularity Memory Review:'",
           "passed": false,
-          "evidence": "The report starts with '# Review Report: Hermes Memory Plugin (`hermes_memory`)' instead of '# Hermes Plugin Review:'."
+          "evidence": "The report starts with '# Review Report: Singularity Memory (`singularity_memory`)' instead of '# Singularity Memory Review:'."
         },
         {
           "text": "rrf_mention: Mentions 'RRF' or 'Reciprocal Rank Fusion'",
@@ -157,9 +157,9 @@
       },
       "expectations": [
         {
-          "text": "structured_report: Output contains '# Hermes Plugin Review:'",
+          "text": "structured_report: Output contains '# Singularity Memory Review:'",
           "passed": false,
-          "evidence": "The report header is '# Review: Hermes BasicProvider Scaffold', which does not match the required '# Hermes Plugin Review:'."
+          "evidence": "The report header is '# Review: Hermes BasicProvider Scaffold', which does not match the required '# Singularity Memory Review:'."
         },
         {
           "text": "missing_hybrid_mention: Identifies missing Hybrid/Vector search",

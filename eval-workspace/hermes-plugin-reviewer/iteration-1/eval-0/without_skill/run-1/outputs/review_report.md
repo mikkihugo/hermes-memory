@@ -1,8 +1,8 @@
-# Review Report: Hermes Memory Plugin (`hermes_memory`)
+# Review Report: Singularity Memory (`singularity_memory`)
 
 ## 1. Executive Summary
 
-The `hermes_memory` plugin is a sophisticated, production-grade external memory provider for Hermes. It leverages a PostgreSQL backend with specialized extensions (`VectorChord`, `Apache AGE`) to provide high-performance hybrid retrieval. The plugin demonstrates a high degree of "intelligence" through its use of multi-lane search fusion, graph expansion, and feedback-driven ranking. It is architected for stability, observability, and performance, making it highly suitable for production environments.
+The `singularity_memory` plugin is a sophisticated, production-grade external memory provider for Hermes. It leverages a PostgreSQL backend with specialized extensions (`VectorChord`, `Apache AGE`) to provide high-performance hybrid retrieval. The plugin demonstrates a high degree of "intelligence" through its use of multi-lane search fusion, graph expansion, and feedback-driven ranking. It is architected for stability, observability, and performance, making it highly suitable for production environments.
 
 **Status:** Production Ready
 **Intelligence Level:** High (State-of-the-Art for RAG-based plugins)
@@ -34,7 +34,7 @@ The plugin supports an optional multi-stage reranking pipeline (Fast/Deep stage)
 The plugin goes beyond simple "store and retrieve" functionality:
 - **Background Prefetching:** Uses a dedicated background thread to anticipate the next turn's retrieval needs, significantly reducing perceived latency for the user.
 - **Automatic Fact Extraction:** At the end of a session, the plugin extracts a summary of recent facts and stores them as a durable memory item, ensuring long-term recall of high-signal information.
-- **Feedback Loop:** Implements a feedback mechanism (`hermes_memory_feedback`) that adjusts a "confidence" score for memory items. This allows the system to learn which types of information are actually helpful to the assistant.
+- **Feedback Loop:** Implements a feedback mechanism (`singularity_memory_feedback`) that adjusts a "confidence" score for memory items. This allows the system to learn which types of information are actually helpful to the assistant.
 - **Relationship Awareness:** The graph expansion capability allows the assistant to "remember" items that are contextually related (e.g., from the same documentation source) even if they don't share specific keywords with the query.
 
 ---
@@ -73,4 +73,4 @@ The plugin goes beyond simple "store and retrieve" functionality:
 
 ## Conclusion
 
-The `hermes_memory` plugin is an exceptionally well-engineered tool. It balances "smart" retrieval features with "boring" but essential production requirements like connection pooling and schema migrations. It is ready for deployment in production Hermes environments.
+The `singularity_memory` plugin is an exceptionally well-engineered tool. It balances "smart" retrieval features with "boring" but essential production requirements like connection pooling and schema migrations. It is ready for deployment in production Hermes environments.
