@@ -157,6 +157,59 @@ async def _run_restore(db_url: str, input_file: Path, schema: str = "public") ->
     return await _restore(resolved_url, input_file, schema)
 
 
+@app.command(name="consolidate")
+def consolidate_cmd(
+    bank_id: str = typer.Option(..., "--bank", help="Bank ID to consolidate"),
+    interval_minutes: int = typer.Option(0, "--interval", help="If > 0, loop with this gap between runs (sleep mode)."),
+):
+    """Run the consolidation pipeline for a bank.
+
+    Idle / sleeptime consolidation: walks recent memories, extracts patterns
+    via the configured LLM, deduplicates, surfaces contradictions, and writes
+    consolidated observations back. Reuses the same `run_consolidation_job`
+    pipeline that retain triggers automatically; this command is for manual
+    or scheduled invocation when retain isn't running often enough.
+
+    Pass `--interval 60` to run continuously every hour. Without --interval,
+    runs once and exits.
+    """
+    import asyncio
+    import time
+
+    async def _run_once() -> dict:
+        from ..engine.memory_engine import MemoryEngine
+        from ..engine.consolidation.consolidator import run_consolidation_job
+        from ..models import RequestContext
+
+        engine = MemoryEngine(run_migrations=False)
+        try:
+            ctx = RequestContext()  # default tenant context
+            return await run_consolidation_job(
+                memory_engine=engine,
+                bank_id=bank_id,
+                request_context=ctx,
+            )
+        finally:
+            await engine.close()
+
+    if interval_minutes <= 0:
+        result = asyncio.run(_run_once())
+        typer.echo(f"consolidate: {result}")
+        return
+
+    typer.echo(f"consolidate: looping every {interval_minutes} minute(s); Ctrl-C to stop.")
+    while True:
+        try:
+            result = asyncio.run(_run_once())
+            typer.echo(f"consolidate: {result}")
+        except KeyboardInterrupt:
+            typer.echo("consolidate: stopped")
+            return
+        except Exception as e:
+            typer.echo(f"consolidate: run failed: {e}")
+        time.sleep(interval_minutes * 60)
+
+
 @app.command(name="backfill-embeddings")
 def backfill_embeddings_cmd(
     bank_id: str = typer.Option(None, "--bank", help="Bank ID to scope backfill to (default: all banks)"),

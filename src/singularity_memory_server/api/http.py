@@ -3045,6 +3045,173 @@ def _register_routes(app: FastAPI):
             logger.error(f"Error in /v1/default/banks/{bank_id}/memories/{memory_id}/history: {error_detail}")
             raise HTTPException(status_code=500, detail=str(e))
 
+    # ── Core memory (Letta-style always-in-context blocks) ───────────────
+    # See alembic c3d4e5f6a7b8. Not searched — read by clients on prefetch
+    # and prepended to every prompt. Edited by the agent via the MCP tools.
+
+    from pydantic import BaseModel as _CoreMemBaseModel
+
+    class _CoreMemorySetRequest(_CoreMemBaseModel):  # type: ignore[misc]
+        content: str
+        char_limit: int | None = None
+        description: str | None = None
+
+    class _CoreMemoryAppendRequest(_CoreMemBaseModel):  # type: ignore[misc]
+        text: str
+
+    class _CoreMemoryReplaceRequest(_CoreMemBaseModel):  # type: ignore[misc]
+        old_text: str
+        new_text: str
+
+    @app.get(
+        "/v1/default/banks/{bank_id}/core-memory",
+        summary="Get core memory blocks",
+        description="Return every named always-in-context block for this bank.",
+        operation_id="core_memory_get_all",
+        tags=["Memory"],
+    )
+    async def api_core_memory_get_all(
+        bank_id: str,
+        request_context: RequestContext = Depends(get_request_context),
+    ):
+        try:
+            return {"bank_id": bank_id, "blocks": await memory.get_core_memory(bank_id=bank_id)}
+        except (AuthenticationError, HTTPException):
+            raise
+        except Exception as e:
+            logger.error(f"Error in /v1/default/banks/{bank_id}/core-memory: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.put(
+        "/v1/default/banks/{bank_id}/core-memory/{block_name}",
+        summary="Create or replace a core memory block",
+        operation_id="core_memory_set",
+        tags=["Memory"],
+    )
+    async def api_core_memory_set(
+        bank_id: str,
+        block_name: str,
+        request: _CoreMemorySetRequest,
+        request_context: RequestContext = Depends(get_request_context),
+    ):
+        try:
+            return await memory.core_memory_set(
+                bank_id=bank_id,
+                block_name=block_name,
+                content=request.content,
+                char_limit=request.char_limit,
+                description=request.description,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except (AuthenticationError, HTTPException):
+            raise
+        except Exception as e:
+            logger.error(f"Error in PUT /v1/default/banks/{bank_id}/core-memory/{block_name}: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.patch(
+        "/v1/default/banks/{bank_id}/core-memory/{block_name}/append",
+        summary="Append to a core memory block",
+        operation_id="core_memory_append",
+        tags=["Memory"],
+    )
+    async def api_core_memory_append(
+        bank_id: str,
+        block_name: str,
+        request: _CoreMemoryAppendRequest,
+        request_context: RequestContext = Depends(get_request_context),
+    ):
+        try:
+            return await memory.core_memory_append(
+                bank_id=bank_id,
+                block_name=block_name,
+                text=request.text,
+            )
+        except (AuthenticationError, HTTPException):
+            raise
+        except Exception as e:
+            logger.error(f"Error in PATCH /v1/default/banks/{bank_id}/core-memory/{block_name}/append: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.patch(
+        "/v1/default/banks/{bank_id}/core-memory/{block_name}/replace",
+        summary="Replace text inside a core memory block",
+        operation_id="core_memory_replace",
+        tags=["Memory"],
+    )
+    async def api_core_memory_replace(
+        bank_id: str,
+        block_name: str,
+        request: _CoreMemoryReplaceRequest,
+        request_context: RequestContext = Depends(get_request_context),
+    ):
+        try:
+            return await memory.core_memory_replace(
+                bank_id=bank_id,
+                block_name=block_name,
+                old_text=request.old_text,
+                new_text=request.new_text,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        except (AuthenticationError, HTTPException):
+            raise
+        except Exception as e:
+            logger.error(f"Error in PATCH /v1/default/banks/{bank_id}/core-memory/{block_name}/replace: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.delete(
+        "/v1/default/banks/{bank_id}/core-memory/{block_name}",
+        summary="Delete a core memory block",
+        operation_id="core_memory_delete",
+        tags=["Memory"],
+    )
+    async def api_core_memory_delete(
+        bank_id: str,
+        block_name: str,
+        request_context: RequestContext = Depends(get_request_context),
+    ):
+        try:
+            removed = await memory.core_memory_delete(bank_id=bank_id, block_name=block_name)
+            return {"bank_id": bank_id, "block_name": block_name, "removed": removed}
+        except (AuthenticationError, HTTPException):
+            raise
+        except Exception as e:
+            logger.error(f"Error in DELETE /v1/default/banks/{bank_id}/core-memory/{block_name}: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    # ── Pressure pager ────────────────────────────────────────────────────
+    # Compress a window of conversation messages into a single archival
+    # memory; lets the agent free context space when the window is filling.
+
+    class _OffloadRequest(_CoreMemBaseModel):  # type: ignore[misc]
+        messages: list[dict]
+        target_chars: int = 1500
+
+    @app.post(
+        "/v1/default/banks/{bank_id}/memories/summarize-and-offload",
+        summary="Summarize a conversation window and persist it as one memory",
+        operation_id="summarize_and_offload",
+        tags=["Memory"],
+    )
+    async def api_summarize_and_offload(
+        bank_id: str,
+        request: _OffloadRequest,
+        request_context: RequestContext = Depends(get_request_context),
+    ):
+        try:
+            return await memory.summarize_and_offload(
+                bank_id=bank_id,
+                messages=request.messages,
+                target_chars=request.target_chars,
+            )
+        except (AuthenticationError, HTTPException):
+            raise
+        except Exception as e:
+            logger.error(f"Error in /v1/default/banks/{bank_id}/memories/summarize-and-offload: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
     # ── Helpfulness feedback ──────────────────────────────────────────────
     # Per-item helpful/unhelpful counts. Stored in memory_units columns added by
     # alembic revision b2c3d4e5f6a7. Retrieval ranking optionally biases

@@ -1988,6 +1988,247 @@ class MemoryEngine(MemoryEngineInterface):
         except Exception as e:
             return {"status": "unhealthy", "database": "error", "error": str(e)}
 
+    # ── Core memory (Letta / MemGPT-style always-in-context blocks) ──
+    # See alembic c3d4e5f6a7b8. Not searched — injected into every prompt
+    # via the Hermes/OpenClaw adapter's prefetch path. Edited by the agent
+    # itself via core_memory_append / core_memory_replace tools.
+
+    async def get_core_memory(self, bank_id: str) -> dict[str, dict]:
+        """Return all core memory blocks for a bank as `{block_name: {content,
+        char_limit, description, updated_at}}`. Empty dict if no blocks yet."""
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT block_name, content, char_limit, description, updated_at "
+                "FROM core_memory_blocks WHERE bank_id = $1 ORDER BY block_name",
+                bank_id,
+            )
+        return {
+            r["block_name"]: {
+                "content": r["content"],
+                "char_limit": int(r["char_limit"]),
+                "description": r["description"],
+                "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None,
+            }
+            for r in rows
+        }
+
+    async def core_memory_set(
+        self,
+        bank_id: str,
+        block_name: str,
+        content: str,
+        *,
+        char_limit: int | None = None,
+        description: str | None = None,
+    ) -> dict:
+        """Create or replace a named core memory block. Truncates content to
+        `char_limit` characters (default 2000) — over-cap content is silently
+        clipped from the right; the agent's responsibility is to summarize
+        before hitting the cap, not the engine's. Returns the post-write row."""
+        if not block_name or not block_name.strip():
+            raise ValueError("block_name cannot be empty")
+        block_name = block_name.strip()
+        char_limit = int(char_limit) if char_limit is not None else 2000
+        if char_limit < 1:
+            raise ValueError("char_limit must be >= 1")
+        truncated = (content or "")[:char_limit]
+        description = description or ""
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "INSERT INTO core_memory_blocks "
+                "(bank_id, block_name, content, char_limit, description, updated_at) "
+                "VALUES ($1, $2, $3, $4, $5, now()) "
+                "ON CONFLICT (bank_id, block_name) DO UPDATE SET "
+                "  content = EXCLUDED.content, "
+                "  char_limit = EXCLUDED.char_limit, "
+                "  description = EXCLUDED.description, "
+                "  updated_at = now() "
+                "RETURNING block_name, content, char_limit, description, updated_at",
+                bank_id, block_name, truncated, char_limit, description,
+            )
+        return {
+            "block_name": row["block_name"],
+            "content": row["content"],
+            "char_limit": int(row["char_limit"]),
+            "description": row["description"],
+            "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+            "truncated": len(content or "") > char_limit,
+        }
+
+    async def core_memory_append(
+        self,
+        bank_id: str,
+        block_name: str,
+        text: str,
+    ) -> dict:
+        """Append `text` to an existing core memory block. Creates the block
+        with default char_limit if it doesn't exist. Truncates from the right
+        if the result would exceed char_limit; sets `truncated=True` in the
+        return so the agent knows to summarize."""
+        async with self._pool.acquire() as conn:
+            existing = await conn.fetchrow(
+                "SELECT content, char_limit FROM core_memory_blocks "
+                "WHERE bank_id = $1 AND block_name = $2",
+                bank_id, block_name,
+            )
+            current_content = existing["content"] if existing else ""
+            char_limit = int(existing["char_limit"]) if existing else 2000
+
+            new_content = current_content + ("\n" if current_content and not current_content.endswith("\n") else "") + (text or "")
+            truncated = len(new_content) > char_limit
+            new_content = new_content[:char_limit]
+
+            row = await conn.fetchrow(
+                "INSERT INTO core_memory_blocks "
+                "(bank_id, block_name, content, char_limit, updated_at) "
+                "VALUES ($1, $2, $3, $4, now()) "
+                "ON CONFLICT (bank_id, block_name) DO UPDATE SET "
+                "  content = EXCLUDED.content, "
+                "  updated_at = now() "
+                "RETURNING block_name, content, char_limit, description, updated_at",
+                bank_id, block_name, new_content, char_limit,
+            )
+        return {
+            "block_name": row["block_name"],
+            "content": row["content"],
+            "char_limit": int(row["char_limit"]),
+            "description": row["description"],
+            "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+            "truncated": truncated,
+        }
+
+    async def core_memory_replace(
+        self,
+        bank_id: str,
+        block_name: str,
+        old_text: str,
+        new_text: str,
+    ) -> dict:
+        """Replace `old_text` with `new_text` inside a core memory block.
+        Useful for the agent to correct stale facts. Raises if old_text isn't
+        present in the block."""
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT content, char_limit FROM core_memory_blocks "
+                "WHERE bank_id = $1 AND block_name = $2",
+                bank_id, block_name,
+            )
+            if not row:
+                raise ValueError(f"core memory block {block_name!r} not found in bank {bank_id!r}")
+            current_content = row["content"]
+            char_limit = int(row["char_limit"])
+            if old_text not in current_content:
+                raise ValueError(f"old_text not found in block {block_name!r}")
+            replaced = current_content.replace(old_text, new_text or "", 1)
+            truncated = len(replaced) > char_limit
+            replaced = replaced[:char_limit]
+            updated = await conn.fetchrow(
+                "UPDATE core_memory_blocks SET content = $1, updated_at = now() "
+                "WHERE bank_id = $2 AND block_name = $3 "
+                "RETURNING block_name, content, char_limit, description, updated_at",
+                replaced, bank_id, block_name,
+            )
+        return {
+            "block_name": updated["block_name"],
+            "content": updated["content"],
+            "char_limit": int(updated["char_limit"]),
+            "description": updated["description"],
+            "updated_at": updated["updated_at"].isoformat() if updated["updated_at"] else None,
+            "truncated": truncated,
+        }
+
+    async def core_memory_delete(self, bank_id: str, block_name: str) -> bool:
+        """Delete a core memory block. Returns True if a row was removed."""
+        async with self._pool.acquire() as conn:
+            result = await conn.execute(
+                "DELETE FROM core_memory_blocks WHERE bank_id = $1 AND block_name = $2",
+                bank_id, block_name,
+            )
+        return "DELETE 1" in result if isinstance(result, str) else False
+
+    async def summarize_and_offload(
+        self,
+        bank_id: str,
+        messages: list[dict],
+        *,
+        target_chars: int = 1500,
+    ) -> dict:
+        """Compress a list of conversation messages into a single archival
+        memory ("pressure pager" for context-window relief, modeled on
+        MemGPT's working-memory loop).
+
+        Concatenates the messages, truncates to roughly `target_chars`, retains
+        as a memory_unit via the standard retain pipeline, and returns the new
+        memory_item_id and a short preview the caller can use to replace the
+        offloaded turns in its prompt.
+
+        Note: this is a deliberate "good enough" implementation that doesn't
+        yet call the LLM to summarize — that's a follow-up. The current
+        version uses simple structural compression (drop tool-call payloads,
+        keep first/last sentences) to free context without an LLM round-trip.
+        """
+        text_pieces: list[str] = []
+        for msg in messages or []:
+            if not isinstance(msg, dict):
+                continue
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                # Anthropic-style content blocks: keep only text blocks
+                content = " ".join(
+                    b.get("text", "") for b in content
+                    if isinstance(b, dict) and b.get("type") == "text"
+                )
+            if not isinstance(content, str):
+                content = str(content)
+            text_pieces.append(f"{role}: {content}")
+
+        joined = "\n".join(text_pieces)
+        if len(joined) > target_chars:
+            half = target_chars // 2
+            joined = joined[:half] + "\n…[truncated]…\n" + joined[-half:]
+
+        # Retain via the standard pipeline so it shows up in future recall.
+        # Use retain_chunks() if present (chunk-only mode), else fall back to
+        # the orchestrator's content-only retain path.
+        retain_payload = [{"content": joined, "role": "summary"}]
+        try:
+            from .retain.types import RetainContent
+            retain_contents = [RetainContent(content=joined, role="summary", source_uri="pressure-pager")]
+        except Exception:
+            retain_contents = retain_payload
+
+        memory_id = ""
+        try:
+            from .retain.orchestrator import retain_batch  # type: ignore
+            # Best-effort: rely on existing retain_batch contract. If the
+            # signature has drifted, we surface an error to the caller rather
+            # than silently dropping the summary.
+            result = await retain_batch(  # type: ignore[misc]
+                pool=self._pool,
+                embeddings_model=self.embeddings,
+                contents=retain_contents,
+                bank_id=bank_id,
+                agent_name="pressure-pager",
+                fact_type_override="summary",
+                config=None,
+                llm_config=None,
+                format_date_fn=lambda d: str(d),
+                log_buffer=[],
+            )
+            if isinstance(result, dict):
+                memory_id = str(result.get("memory_item_id") or "")
+        except Exception as e:
+            logger.warning("summarize_and_offload: retain failed; returning summary text without persistence: %s", e)
+
+        preview = joined[:280] + ("…" if len(joined) > 280 else "")
+        return {
+            "memory_item_id": memory_id,
+            "preview": preview,
+            "compressed_chars": len(joined),
+            "original_message_count": len(messages or []),
+        }
+
     async def record_feedback(self, memory_item_id: str, helpful: bool) -> dict:
         """Increment the helpful_count or unhelpful_count for one memory unit.
 

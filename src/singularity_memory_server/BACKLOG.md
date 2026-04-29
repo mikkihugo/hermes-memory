@@ -105,6 +105,63 @@ what was ported and where.
 
 ---
 
+## Letta / MemGPT-style features (also landed)
+
+Three additional features ported from the convergent design across Letta,
+MemGPT, and Google's Always On Memory Agent.
+
+### #7 Core memory blocks
+
+Letta-style "always-in-context" facts (persona, user_profile, system_directives).
+Distinct from archival memory: not searched, injected into every prompt by
+the client adapter; edited by the agent via tool calls.
+
+- **Migration**: `c3d4e5f6a7b8_add_core_memory_blocks` adds a
+  `core_memory_blocks` table (bank_id, block_name, content, char_limit,
+  description, created_at, updated_at).
+- **Engine**: `MemoryEngine.{get_core_memory, core_memory_set,
+  core_memory_append, core_memory_replace, core_memory_delete}`.
+  All bounded by `char_limit` (default 2000) with a `truncated=True`
+  signal so the agent knows to summarize.
+- **HTTP**: `GET /v1/.../core-memory`, `PUT/PATCH/DELETE
+  /v1/.../core-memory/{block_name}` (and `.../append`, `.../replace`).
+- **MCP**: `core_memory_get / set / append / replace / delete` tools,
+  registered by default.
+- **Hermes adapter**: `prefetch()` now fetches core blocks before recall
+  and prepends them in a `<core-memory>` envelope (with explicit
+  "untrusted historical context" framing). Tool surface added:
+  `singularity_core_memory_*` and `singularity_memory_summarize_offload`.
+
+### #8 Pressure pager (`summarize_and_offload`)
+
+MemGPT's working-memory loop: agent voluntarily compresses old turns to
+free context space.
+
+- **Engine**: `MemoryEngine.summarize_and_offload(bank_id, messages,
+  target_chars)` — concatenates messages, truncates to roughly
+  `target_chars` (head + tail with ellipsis), retains via the standard
+  retain pipeline so the summary becomes searchable, returns
+  `{memory_item_id, preview, compressed_chars, original_message_count}`.
+- **HTTP**: `POST /v1/.../memories/summarize-and-offload`.
+- **MCP**: `memory_summarize_and_offload` tool, registered by default.
+- **Note**: current implementation uses structural compression
+  (head+tail), not LLM summarization. LLM-driven version is a follow-up
+  — drop in `llm_config.summarize(...)` call when ready.
+
+### #9 Idle consolidation worker
+
+Wraps the existing `run_consolidation_job` so it can be triggered
+manually or on a schedule outside the retain pipeline (which only runs
+consolidation reactively).
+
+- **CLI**: `singularity-memory-server admin consolidate --bank <id>
+  [--interval 60]`. Without `--interval`, runs once. With `--interval N`,
+  loops with N-minute gaps until Ctrl-C — minimal viable cron-in-process.
+  For real production scheduling use systemd timers / k8s CronJob calling
+  the bare command repeatedly.
+
+---
+
 ## Open follow-ups (deferred, not blocking)
 
 - **Auto-backfill on toggle** — kick off `backfill_embeddings` in a

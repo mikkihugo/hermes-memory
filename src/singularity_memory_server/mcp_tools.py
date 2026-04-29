@@ -210,6 +210,8 @@ def register_mcp_tools(
         "sync_retain",
         "recall",
         "feedback",
+        "core_memory",
+        "summarize_and_offload",
         "reflect",
         "list_banks",
         "create_bank",
@@ -250,6 +252,12 @@ def register_mcp_tools(
 
     if "feedback" in tools_to_register:
         _register_feedback(mcp, memory, config)
+
+    if "core_memory" in tools_to_register:
+        _register_core_memory(mcp, memory, config)
+
+    if "summarize_and_offload" in tools_to_register:
+        _register_summarize_and_offload(mcp, memory, config)
 
     if "reflect" in tools_to_register:
         _register_reflect(mcp, memory, config)
@@ -937,6 +945,219 @@ def _register_feedback(mcp: FastMCP, memory: MemoryEngine, config: MCPToolsConfi
                 return {"error": str(e)}
             except Exception as e:
                 logger.error(f"memory_feedback failed: {e}", exc_info=True)
+                return {"error": str(e)}
+
+
+def _register_core_memory(mcp: FastMCP, memory: MemoryEngine, config: MCPToolsConfig) -> None:
+    """Register Letta-style core memory tools.
+
+    Core memory blocks are short, named, always-in-context facts (e.g.
+    `persona`, `user_profile`, `system_directives`). Distinct from archival
+    memory: not searched, just injected into every prompt by the client
+    adapter. Edited by the agent itself via these tools.
+
+    Backed by the `core_memory_blocks` table (alembic c3d4e5f6a7b8). Each
+    block has a `char_limit` (default 2000); over-cap writes truncate with a
+    `truncated=True` flag in the response so the agent knows to summarize.
+    """
+    bank_param = config.include_bank_id_param
+
+    if bank_param:
+
+        @mcp.tool()
+        async def core_memory_get(bank_id: str) -> dict:
+            """Return all named always-in-context blocks for the bank."""
+            try:
+                return {"blocks": await memory.get_core_memory(bank_id=bank_id)}
+            except Exception as e:
+                logger.error(f"core_memory_get failed: {e}", exc_info=True)
+                return {"error": str(e), "blocks": {}}
+
+        @mcp.tool()
+        async def core_memory_set(
+            bank_id: str,
+            block_name: str,
+            content: str,
+            char_limit: int | None = None,
+            description: str | None = None,
+        ) -> dict:
+            """Create or replace a named block. Use this when introducing a
+            new fact category (e.g. block_name='persona') or completely
+            rewriting an existing block."""
+            try:
+                return await memory.core_memory_set(
+                    bank_id=bank_id, block_name=block_name, content=content,
+                    char_limit=char_limit, description=description,
+                )
+            except ValueError as e:
+                return {"error": str(e)}
+            except Exception as e:
+                logger.error(f"core_memory_set failed: {e}", exc_info=True)
+                return {"error": str(e)}
+
+        @mcp.tool()
+        async def core_memory_append(bank_id: str, block_name: str, text: str) -> dict:
+            """Append `text` to the named block. Auto-creates the block with
+            default char_limit if it doesn't exist. If the result would
+            exceed char_limit, the block is truncated and `truncated=True`
+            is returned so the agent can summarize before appending more."""
+            try:
+                return await memory.core_memory_append(
+                    bank_id=bank_id, block_name=block_name, text=text,
+                )
+            except Exception as e:
+                logger.error(f"core_memory_append failed: {e}", exc_info=True)
+                return {"error": str(e)}
+
+        @mcp.tool()
+        async def core_memory_replace(
+            bank_id: str, block_name: str, old_text: str, new_text: str,
+        ) -> dict:
+            """Replace `old_text` with `new_text` inside an existing block.
+            Used to correct stale facts in-place. Errors if old_text isn't
+            found — to prevent silent failures."""
+            try:
+                return await memory.core_memory_replace(
+                    bank_id=bank_id, block_name=block_name,
+                    old_text=old_text, new_text=new_text,
+                )
+            except ValueError as e:
+                return {"error": str(e)}
+            except Exception as e:
+                logger.error(f"core_memory_replace failed: {e}", exc_info=True)
+                return {"error": str(e)}
+
+        @mcp.tool()
+        async def core_memory_delete(bank_id: str, block_name: str) -> dict:
+            """Drop a named block entirely. Returns `{removed: bool}`."""
+            try:
+                removed = await memory.core_memory_delete(bank_id=bank_id, block_name=block_name)
+                return {"block_name": block_name, "removed": removed}
+            except Exception as e:
+                logger.error(f"core_memory_delete failed: {e}", exc_info=True)
+                return {"error": str(e)}
+    else:
+
+        @mcp.tool()
+        async def core_memory_get() -> dict:
+            """Return all named always-in-context blocks for the bank."""
+            from .api.mcp import DEFAULT_BANK_ID  # type: ignore
+            bank_id = DEFAULT_BANK_ID
+            try:
+                return {"blocks": await memory.get_core_memory(bank_id=bank_id)}
+            except Exception as e:
+                logger.error(f"core_memory_get failed: {e}", exc_info=True)
+                return {"error": str(e), "blocks": {}}
+
+        @mcp.tool()
+        async def core_memory_set(
+            block_name: str,
+            content: str,
+            char_limit: int | None = None,
+            description: str | None = None,
+        ) -> dict:
+            """Create or replace a named block."""
+            from .api.mcp import DEFAULT_BANK_ID  # type: ignore
+            try:
+                return await memory.core_memory_set(
+                    bank_id=DEFAULT_BANK_ID, block_name=block_name, content=content,
+                    char_limit=char_limit, description=description,
+                )
+            except ValueError as e:
+                return {"error": str(e)}
+            except Exception as e:
+                logger.error(f"core_memory_set failed: {e}", exc_info=True)
+                return {"error": str(e)}
+
+        @mcp.tool()
+        async def core_memory_append(block_name: str, text: str) -> dict:
+            """Append `text` to the named block."""
+            from .api.mcp import DEFAULT_BANK_ID  # type: ignore
+            try:
+                return await memory.core_memory_append(
+                    bank_id=DEFAULT_BANK_ID, block_name=block_name, text=text,
+                )
+            except Exception as e:
+                logger.error(f"core_memory_append failed: {e}", exc_info=True)
+                return {"error": str(e)}
+
+        @mcp.tool()
+        async def core_memory_replace(block_name: str, old_text: str, new_text: str) -> dict:
+            """Replace `old_text` with `new_text` inside an existing block."""
+            from .api.mcp import DEFAULT_BANK_ID  # type: ignore
+            try:
+                return await memory.core_memory_replace(
+                    bank_id=DEFAULT_BANK_ID, block_name=block_name,
+                    old_text=old_text, new_text=new_text,
+                )
+            except ValueError as e:
+                return {"error": str(e)}
+            except Exception as e:
+                logger.error(f"core_memory_replace failed: {e}", exc_info=True)
+                return {"error": str(e)}
+
+        @mcp.tool()
+        async def core_memory_delete(block_name: str) -> dict:
+            """Drop a named block entirely."""
+            from .api.mcp import DEFAULT_BANK_ID  # type: ignore
+            try:
+                removed = await memory.core_memory_delete(bank_id=DEFAULT_BANK_ID, block_name=block_name)
+                return {"block_name": block_name, "removed": removed}
+            except Exception as e:
+                logger.error(f"core_memory_delete failed: {e}", exc_info=True)
+                return {"error": str(e)}
+
+
+def _register_summarize_and_offload(mcp: FastMCP, memory: MemoryEngine, config: MCPToolsConfig) -> None:
+    """Register the pressure-pager tool.
+
+    Compresses a list of conversation messages into a single archival memory.
+    Use case: agent's context window is filling; agent calls this on the
+    older turns to free space; the returned summary text replaces them in
+    the next prompt. Modeled on MemGPT's working-memory loop.
+    """
+    if config.include_bank_id_param:
+
+        @mcp.tool()
+        async def memory_summarize_and_offload(
+            bank_id: str,
+            messages: list[dict],
+            target_chars: int = 1500,
+        ) -> dict:
+            """Compress a window of conversation messages into one memory.
+
+            Args:
+                bank_id: Bank scope.
+                messages: List of `{role, content}` dicts (Anthropic-style
+                    `[{type:'text', text:...}]` content blocks also accepted).
+                target_chars: Approximate compressed size; output may be
+                    slightly larger or smaller.
+
+            Returns: `{memory_item_id, preview, compressed_chars,
+            original_message_count}`.
+            """
+            try:
+                return await memory.summarize_and_offload(
+                    bank_id=bank_id, messages=messages, target_chars=target_chars,
+                )
+            except Exception as e:
+                logger.error(f"summarize_and_offload failed: {e}", exc_info=True)
+                return {"error": str(e)}
+    else:
+
+        @mcp.tool()
+        async def memory_summarize_and_offload(
+            messages: list[dict],
+            target_chars: int = 1500,
+        ) -> dict:
+            """Compress a window of conversation messages into one memory."""
+            from .api.mcp import DEFAULT_BANK_ID  # type: ignore
+            try:
+                return await memory.summarize_and_offload(
+                    bank_id=DEFAULT_BANK_ID, messages=messages, target_chars=target_chars,
+                )
+            except Exception as e:
+                logger.error(f"summarize_and_offload failed: {e}", exc_info=True)
                 return {"error": str(e)}
 
 
