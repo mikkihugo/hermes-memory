@@ -177,42 +177,127 @@ class BackgroundWorkers:
     async def _auto_consolidation_loop(self) -> None:
         """Run `run_consolidation_job` for each known bank periodically.
 
-        Banks are discovered via `engine.get_banks()` (or equivalent). Each
-        run respects the bank's own consolidation enable flag — banks with
-        `enable_observations=False` will short-circuit inside the consolidator.
+        Borrowed from Claude Code's autoDream scheduling discipline: gate
+        each per-bank run on a triple of cheap-to-expensive checks.
+
+        1. **Time gate** — last_run_at must be older than the configured
+           interval (cheap: one row read from consolidation_state).
+        2. **New-memory gate** — at least `auto_consolidation_min_new`
+           memory_units must have been added since the last run (one
+           COUNT). Skips banks that haven't seen activity.
+        3. **Advisory lock** — pg_try_advisory_lock keyed on bank_id, so
+           two server instances pointed at the same DB don't double-fire.
+
+        Plus a scan throttle: even when the outer interval ticks, we don't
+        re-scan banks more often than `auto_consolidation_scan_throttle_seconds`.
         """
         engine = self._engine
         if engine is None:
             return
         cfg = getattr(engine, "_config", None)
         interval = int(getattr(cfg, "auto_consolidation_interval_seconds", 3600))
+        min_new = int(getattr(cfg, "auto_consolidation_min_new", 5))
+        scan_throttle = int(getattr(cfg, "auto_consolidation_scan_throttle_seconds", 600))
+
+        from datetime import datetime, timezone
+
+        last_scan_monotonic: float = 0.0
 
         while not self._stopping.is_set():
-            try:
-                bank_ids = await self._list_bank_ids(engine)
+            now_monotonic = asyncio.get_event_loop().time()
+            if now_monotonic - last_scan_monotonic < scan_throttle:
+                logger.debug(
+                    "auto_consolidation: scan throttled (%.1fs since last scan)",
+                    now_monotonic - last_scan_monotonic,
+                )
+            else:
+                last_scan_monotonic = now_monotonic
+                try:
+                    bank_ids = await self._list_bank_ids(engine)
+                except Exception:
+                    logger.exception("auto_consolidation: list_bank_ids failed")
+                    bank_ids = []
+
                 for bank_id in bank_ids:
                     if self._stopping.is_set():
                         return
                     try:
-                        from .consolidation.consolidator import run_consolidation_job
-                        from ..models import RequestContext
-
-                        result = await run_consolidation_job(
-                            memory_engine=engine,
-                            bank_id=bank_id,
-                            request_context=RequestContext(),
+                        await self._consolidate_bank_if_due(
+                            engine, bank_id, interval=interval, min_new=min_new,
                         )
-                        logger.info("auto_consolidation(%s): %s", bank_id, result.get("status", "ok") if isinstance(result, dict) else "ran")
                     except Exception:
                         logger.exception("auto_consolidation(%s) failed", bank_id)
-            except Exception:
-                logger.exception("auto_consolidation: tick failed")
 
             try:
-                await asyncio.wait_for(self._stopping.wait(), timeout=max(60, interval))
+                # Wake more often than the interval so the scan throttle gets a
+                # chance to fire when activity picks up. Outer interval is the
+                # upper bound; throttle is the lower.
+                wake_in = max(scan_throttle, min(interval, 300))
+                await asyncio.wait_for(self._stopping.wait(), timeout=wake_in)
                 return  # _stopping was set
             except asyncio.TimeoutError:
                 continue
+
+    async def _consolidate_bank_if_due(
+        self,
+        engine: "MemoryEngine",
+        bank_id: str,
+        *,
+        interval: int,
+        min_new: int,
+    ) -> None:
+        """Triple-gate per-bank consolidation. See `_auto_consolidation_loop`."""
+        from datetime import datetime, timezone
+
+        # Gate 1: time
+        state = await engine.consolidation_get_state(bank_id)
+        last_run_at = state["last_run_at"]
+        now = datetime.now(timezone.utc)
+        if last_run_at is not None:
+            elapsed = (now - last_run_at).total_seconds()
+            if elapsed < interval:
+                logger.debug("auto_consolidation(%s): time gate (%.0fs < %ds)", bank_id, elapsed, interval)
+                return
+
+        # Gate 2: new memories
+        new_count = await engine.consolidation_count_new(bank_id, since_at=last_run_at)
+        if new_count < min_new:
+            logger.debug(
+                "auto_consolidation(%s): new-memory gate (%d new < %d required)",
+                bank_id, new_count, min_new,
+            )
+            return
+
+        # Gate 3: cross-instance advisory lock
+        got_lock = await engine.consolidation_try_lock(bank_id)
+        if not got_lock:
+            logger.info("auto_consolidation(%s): another instance holds the lock; skipping", bank_id)
+            return
+
+        try:
+            from .consolidation.consolidator import run_consolidation_job
+            from ..models import RequestContext
+
+            logger.info(
+                "auto_consolidation(%s): running (%d new memories since %s)",
+                bank_id, new_count, last_run_at.isoformat() if last_run_at else "first-run",
+            )
+            result = await run_consolidation_job(
+                memory_engine=engine,
+                bank_id=bank_id,
+                request_context=RequestContext(),
+            )
+            # Stamp completion using the post-run total so the next gate
+            # check measures growth accurately.
+            total_now = await engine.consolidation_count_new(bank_id, since_at=None)
+            await engine.consolidation_record_run(bank_id, memories_at_run=total_now)
+            logger.info(
+                "auto_consolidation(%s): %s",
+                bank_id,
+                result.get("status", "ok") if isinstance(result, dict) else "ran",
+            )
+        finally:
+            await engine.consolidation_unlock(bank_id)
 
     async def _list_bank_ids(self, engine: "MemoryEngine") -> list[str]:
         """Best-effort list of banks to consolidate. Falls back to ['default']

@@ -2289,6 +2289,104 @@ class MemoryEngine(MemoryEngineInterface):
             "original_message_count": len(messages or []),
         }
 
+    # ── Consolidation scheduling state (autoDream-style discipline) ──
+    # See alembic d4e5f6a7b8c9. The auto_consolidation_loop reads this
+    # state to gate runs on actual activity (time AND new-memory count)
+    # rather than a flat interval timer, and uses a Postgres advisory lock
+    # to make scheduling cross-instance-safe.
+
+    @staticmethod
+    def _consolidation_lock_keys(bank_id: str) -> tuple[int, int]:
+        """Stable 64-bit pair for pg_try_advisory_lock(bank_id).
+
+        We use a fixed namespace constant in key1 so the lock can't collide
+        with other advisory locks in the same database, and a stable hash
+        of the bank_id in key2.
+        """
+        import hashlib
+        # Namespace: arbitrary but stable. ASCII for "SMC0NSO1" (Singularity
+        # Memory CONSOLidation, made up — just unique).
+        ns = 0x534D434F4E534F31 & 0x7FFFFFFFFFFFFFFF  # signed-int-safe
+        digest = hashlib.blake2b(bank_id.encode("utf-8"), digest_size=8).digest()
+        key2 = int.from_bytes(digest, "big", signed=False) & 0x7FFFFFFFFFFFFFFF
+        return ns, key2
+
+    async def consolidation_try_lock(self, bank_id: str) -> bool:
+        """Acquire an advisory lock for this bank's consolidation.
+
+        Non-blocking. Returns True if we got the lock, False if another
+        connection (possibly a different instance pointing at the same DB)
+        already holds it. The lock is released by `consolidation_unlock` or
+        when the connection is returned to the pool — but we explicitly
+        release to keep advisory locks tidy.
+        """
+        ns, key2 = self._consolidation_lock_keys(bank_id)
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT pg_try_advisory_lock($1, $2) AS got", ns, key2)
+        return bool(row and row["got"])
+
+    async def consolidation_unlock(self, bank_id: str) -> None:
+        """Release the consolidation advisory lock for this bank.
+
+        Safe to call even if we don't hold it (Postgres returns false; we
+        ignore). Always release after consolidation_try_lock returned True.
+        """
+        ns, key2 = self._consolidation_lock_keys(bank_id)
+        async with self._pool.acquire() as conn:
+            await conn.execute("SELECT pg_advisory_unlock($1, $2)", ns, key2)
+
+    async def consolidation_get_state(self, bank_id: str) -> dict:
+        """Return scheduling state for a bank as
+        `{last_run_at: datetime|None, memories_at_last_run: int}`. Empty
+        defaults if the bank has never been consolidated."""
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT last_run_at, memories_at_last_run FROM consolidation_state WHERE bank_id = $1",
+                bank_id,
+            )
+        if row is None:
+            return {"last_run_at": None, "memories_at_last_run": 0}
+        return {
+            "last_run_at": row["last_run_at"],
+            "memories_at_last_run": int(row["memories_at_last_run"]),
+        }
+
+    async def consolidation_count_new(self, bank_id: str, *, since_at) -> int:
+        """Count memory_units rows in this bank with `created_at > since_at`.
+
+        When `since_at` is None (bank has never been consolidated), counts
+        every row in the bank.
+        """
+        async with self._pool.acquire() as conn:
+            if since_at is None:
+                row = await conn.fetchrow(
+                    "SELECT COUNT(*) AS n FROM memory_units WHERE bank_id = $1",
+                    bank_id,
+                )
+            else:
+                row = await conn.fetchrow(
+                    "SELECT COUNT(*) AS n FROM memory_units "
+                    "WHERE bank_id = $1 AND created_at > $2",
+                    bank_id, since_at,
+                )
+        return int(row["n"]) if row else 0
+
+    async def consolidation_record_run(self, bank_id: str, *, memories_at_run: int) -> None:
+        """Stamp last_run_at = now() and memories_at_last_run = N for this
+        bank. Called by the auto-consolidation loop after a successful run
+        so the next gate check can compute "new memories since."
+        """
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO consolidation_state (bank_id, last_run_at, memories_at_last_run, updated_at) "
+                "VALUES ($1, now(), $2, now()) "
+                "ON CONFLICT (bank_id) DO UPDATE SET "
+                "  last_run_at = EXCLUDED.last_run_at, "
+                "  memories_at_last_run = EXCLUDED.memories_at_last_run, "
+                "  updated_at = now()",
+                bank_id, int(memories_at_run),
+            )
+
     async def record_feedback(self, memory_item_id: str, helpful: bool) -> dict:
         """Increment the helpful_count or unhelpful_count for one memory unit.
 

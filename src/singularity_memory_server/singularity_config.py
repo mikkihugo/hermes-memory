@@ -276,6 +276,8 @@ ENV_AUTO_BACKFILL_ENABLED = "SINGULARITY_AUTO_BACKFILL_ENABLED"
 ENV_AUTO_BACKFILL_INTERVAL_SECONDS = "SINGULARITY_AUTO_BACKFILL_INTERVAL_SECONDS"
 ENV_AUTO_CONSOLIDATION_ENABLED = "SINGULARITY_AUTO_CONSOLIDATION_ENABLED"
 ENV_AUTO_CONSOLIDATION_INTERVAL_SECONDS = "SINGULARITY_AUTO_CONSOLIDATION_INTERVAL_SECONDS"
+ENV_AUTO_CONSOLIDATION_MIN_NEW = "SINGULARITY_AUTO_CONSOLIDATION_MIN_NEW"
+ENV_AUTO_CONSOLIDATION_SCAN_THROTTLE_SECONDS = "SINGULARITY_AUTO_CONSOLIDATION_SCAN_THROTTLE_SECONDS"
 ENV_EMBEDDINGS_PENDING_REFRESH_SECONDS = "SINGULARITY_EMBEDDINGS_PENDING_REFRESH_SECONDS"
 
 ENV_HOST = "SINGULARITY_HOST"
@@ -558,6 +560,11 @@ DEFAULT_AUTO_BACKFILL_ENABLED = False
 DEFAULT_AUTO_BACKFILL_INTERVAL_SECONDS = 300  # 5 min between backfill passes
 DEFAULT_AUTO_CONSOLIDATION_ENABLED = False
 DEFAULT_AUTO_CONSOLIDATION_INTERVAL_SECONDS = 3600  # 1 hour between sleeptime runs
+# autoDream-borrowed scheduling discipline: skip the run when nothing
+# changed, throttle scan loops, and use a Postgres advisory lock so
+# multiple server instances don't double-fire.
+DEFAULT_AUTO_CONSOLIDATION_MIN_NEW = 5  # min new memory_units since last run before re-firing
+DEFAULT_AUTO_CONSOLIDATION_SCAN_THROTTLE_SECONDS = 600  # don't re-scan banks more often than this
 DEFAULT_EMBEDDINGS_PENDING_REFRESH_SECONDS = 60  # how often the cached count is refreshed
 
 # LiteLLM defaults
@@ -856,6 +863,8 @@ class SingularityConfig:
     auto_backfill_interval_seconds: int
     auto_consolidation_enabled: bool
     auto_consolidation_interval_seconds: int
+    auto_consolidation_min_new: int
+    auto_consolidation_scan_throttle_seconds: int
     embeddings_pending_refresh_seconds: int
 
     # LLM (default, used as fallback for per-operation config)
@@ -1353,6 +1362,8 @@ class SingularityConfig:
             auto_backfill_interval_seconds=int(os.getenv(ENV_AUTO_BACKFILL_INTERVAL_SECONDS, str(DEFAULT_AUTO_BACKFILL_INTERVAL_SECONDS))),
             auto_consolidation_enabled=os.getenv(ENV_AUTO_CONSOLIDATION_ENABLED, str(DEFAULT_AUTO_CONSOLIDATION_ENABLED)).lower() == "true",
             auto_consolidation_interval_seconds=int(os.getenv(ENV_AUTO_CONSOLIDATION_INTERVAL_SECONDS, str(DEFAULT_AUTO_CONSOLIDATION_INTERVAL_SECONDS))),
+            auto_consolidation_min_new=int(os.getenv(ENV_AUTO_CONSOLIDATION_MIN_NEW, str(DEFAULT_AUTO_CONSOLIDATION_MIN_NEW))),
+            auto_consolidation_scan_throttle_seconds=int(os.getenv(ENV_AUTO_CONSOLIDATION_SCAN_THROTTLE_SECONDS, str(DEFAULT_AUTO_CONSOLIDATION_SCAN_THROTTLE_SECONDS))),
             embeddings_pending_refresh_seconds=int(os.getenv(ENV_EMBEDDINGS_PENDING_REFRESH_SECONDS, str(DEFAULT_EMBEDDINGS_PENDING_REFRESH_SECONDS))),
             # LLM
             llm_provider=llm_provider,
