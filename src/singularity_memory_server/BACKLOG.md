@@ -210,12 +210,114 @@ cleanly by `MemoryEngine.close()`.
 
 ## Remaining follow-ups
 
+### #13 Team-memory secret scanner + write-time guard
+
+Borrowed from Claude Code's `src/services/teamMemorySync/secretScanner.ts`
++ `teamMemSecretGuard.ts`. We're a SHARED memory backend across many
+agents; without this, an agent can persist an API key into a bank that
+gets surfaced to other agents/users on recall. Real security gap.
+
+**Implementation sketch**:
+- New `engine/secret_scanner.py` module with a curated gitleaks-style
+  regex set. Patterns to cover: AWS (`AKIA...`), GCP (`AIza...`), Azure
+  AD, Anthropic (`sk-ant-api-03-...`), OpenAI (`sk-...`), HuggingFace,
+  GitHub PATs (`ghp_`, `github_pat_`), DigitalOcean (`dop_v1_`,
+  `doo_v1_`), generic high-entropy tokens.
+- Hook point: `MemoryEngine.retain` and `MemoryEngine.core_memory_set
+  / core_memory_append`. Two modes via config:
+  - `secret_scan_mode = "block"` (default): reject the write with the
+    matched label list.
+  - `secret_scan_mode = "redact"`: replace the matched span with
+    `[REDACTED:<label>]` and continue.
+- Surface the matched label in the API response so the client can
+  surface a clear error to the user.
+- Make the regex set extensible via env or config so operators can add
+  org-specific patterns.
+
+**Risk**: low. No schema change. Hook is in retain — adding it doesn't
+disturb recall.
+
+### #14 Tool-context-aware retrieval filter
+
+Borrowed from Claude Code's `findRelevantMemories.ts` system prompt
+("if a list of recently-used tools is provided, do not select memories
+that are usage reference or API documentation for those tools"). When
+the agent is actively using tool X, surfacing how-to-use-X memories is
+noise — gotchas for X are still valuable.
+
+**Implementation sketch**:
+- Add an optional `tool_context: list[str]` parameter to recall.
+- Memory items can carry an optional `tool_refs: list[str]` and
+  `memory_kind: "usage_doc" | "gotcha" | "fact" | ...` (extends
+  existing fact_type taxonomy).
+- Recall path filters out items where
+  `memory_kind == "usage_doc" AND tool_refs ∩ tool_context != ∅`.
+  Items with `memory_kind == "gotcha"` referencing the same tools get
+  a small ranking boost (they matter EXACTLY when the tool is in use).
+- Pure metadata filter — no LLM call.
+
+**Risk**: low-medium. Schema change (alembic migration adding two
+nullable columns to `memory_units`) but no behavioral changes for
+existing rows (which leave both fields NULL → filter never fires).
+
+### #15 End-of-turn extraction with dedup-by-inspection (opt-in)
+
+Borrowed from Claude Code's `services/extractMemories/`. Replaces blind
+`retain(every_turn_text)` with an LLM-driven extraction that looks at
+recent messages, checks against existing memories in this bank, and
+writes only fresh facts. Higher memory quality, bounded cost.
+
+**Implementation sketch**:
+- New `MemoryEngine.extract_and_retain(bank_id, messages,
+  recent_memory_count=20)` method. Two-step LLM call:
+  1. List recent memory headers from the bank (cheap SQL, no embedding).
+  2. Send the agent a prompt: "Here are the recent messages and the
+     existing memory headers. Return a JSON list of new facts to save,
+     or an empty list. Update an existing fact in place if a duplicate
+     would be created."
+  3. Apply the writes.
+- Off by default (config: `extract_memories_enabled: bool = False`).
+  Operators who want it pay the per-turn LLM cost.
+- HTTP/MCP surface: the existing `sync_turn`/`retain` paths can opt
+  into extraction mode via a request flag, or operators can change the
+  default at config level.
+
+**Risk**: medium. Adds a new LLM call path; failures should silently
+fall back to the existing `retain` behavior. Doesn't touch retrieval.
+
+### Why we DON'T port
+
+For posterity, the patterns we examined and rejected as poor fits for
+a multi-client memory backend:
+
+- **`MEMORY.md` always-loaded entrypoint with caps** — their
+  human-readable index of topic files. Our `core_memory_blocks` does
+  the same job in a structured shape. Different surface, equivalent
+  function; double-implementing would create two truths.
+- **DreamTask forked-agent runtime** — only works when one agent owns
+  the memory directory and can fork a sub-agent against the same
+  toolset. Doesn't generalize to a server with many concurrent clients,
+  none of which "own" the corpus. Our consolidation is server-driven
+  via `run_consolidation_job` + the autoDream-borrowed scheduling
+  discipline; that's the right shape for our use case.
+- **`agentMemorySnapshot`** — single-agent warm-start. We track per-bank
+  state in DB.
+- **LLM-as-retrieval (Sonnet picks ≤5 from headers)** — expensive per
+  query, doesn't beat our BM25+vector+RRF at scale. Acceptable when
+  query volume is low and the corpus is small (Claude Code's case);
+  not when many agents share one backend.
+- **Boundary-marker compaction semantics** — caller-driven version is
+  already supported by `summarize_and_offload`. Explicit boundary
+  semantics are a UX layer the client should add, not the engine.
+
+### Earlier follow-ups (still open)
+
 - **Feedback signal tuning** — the `tanh / 5` saturation and `±5%`
-  bound in apply_combined_scoring are conservative defaults. Once
+  bound in `apply_combined_scoring` are conservative defaults. Once
   real-world feedback data is available, sweep these against held-out
   recall benchmarks.
 - **Validate against real Postgres + vchord** — none of the engine
-  ports have been run against a live database in development. Code
+  ports have been run against a live database in this session. Code
   compiles, signatures align, but the alembic migrations + retain/recall
   integration paths need a smoke test before we make confident
   retrieval-quality claims.
